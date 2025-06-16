@@ -1,0 +1,36 @@
+
+{
+  "name": "secunik",
+  "version": "1.0.0",
+  "description": "SecuNik - Ultimate Local Cybersecurity Analysis Platform",
+  "private": true,
+  "scripts": {
+    "setup": "python scripts/setup.py",
+    "install": "python scripts/install-deps.py",
+    "start": "python scripts/start.py",
+    "clean": "python scripts/clean.py",
+    "backend": "cd backend && python run.py",
+    "frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "test": "echo \"Tests will be added in future phases\" && exit 0"
+  },
+  "keywords": [
+    "cybersecurity",
+    "forensics",
+    "analysis",
+    "security",
+    "incident-response"
+  ],
+  "author": "SecuNik Development Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/secunik.git"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "python": ">=3.8.0"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}

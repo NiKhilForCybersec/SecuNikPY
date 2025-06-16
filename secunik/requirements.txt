@@ -1,0 +1,33 @@
+# Core Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+
+# Data Processing
+pandas==2.1.3
+numpy==1.25.2
+
+# File Format Support
+PyPDF2==3.0.1
+openpyxl==3.1.2
+
+# Network & Web Analysis
+requests==2.31.0
+
+# Cryptography & Security
+cryptography==41.0.7
+
+# Utilities
+python-dateutil==2.8.2
+chardet==5.2.0
+tqdm==4.66.1
+
+# Report Generation
+jinja2==3.1.2
+
+# Development & Testing
+pytest==7.4.3
+
+# File type detection - alternative to python-magic
+filetype==1.2.0

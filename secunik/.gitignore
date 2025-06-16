@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+
+# Virtual Environment
+backend/venv/
+env/
+ENV/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Build outputs
+frontend/dist/
+
+# Environment variables
+.env
+.env.local
+
+# Data files
+backend/data/uploads/*
+backend/data/temp/*
+backend/data/cases/*
+backend/data/results/*
+!backend/data/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
