@@ -1,6 +1,6 @@
 """
 Analysis Component for SecuNik
-Shows detailed analysis results and insights
+Shows detailed analysis results and insights - FIXED VERSION
 """
 
 import streamlit as st
@@ -21,12 +21,20 @@ def show_analysis_page():
     
     if "error" in analyses_data:
         st.error("❌ Failed to load analysis results")
+        st.info("Make sure backend is running: cd backend && python run.py")
         return
     
     analyses = analyses_data.get("analyses", [])
     
     if not analyses:
         st.info("📭 No analysis results yet. Upload files to see results here!")
+        
+        # Quick upload link
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("📤 Go to Upload Page", use_container_width=True, key="goto_upload"):
+                st.session_state.page_selector = "📤 Upload & Analyze"
+                st.rerun()
         return
     
     # Analysis overview
@@ -124,7 +132,7 @@ def show_analysis_browser(client, analyses):
         severity_filter = st.selectbox(
             "Filter by Severity",
             ["All"] + ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
-            key="severity_filter"
+            key="analysis_severity_filter"
         )
     
     with col2:
@@ -133,18 +141,19 @@ def show_analysis_browser(client, analyses):
         type_filter = st.selectbox(
             "Filter by Type",
             analysis_types,
-            key="type_filter"
+            key="analysis_type_filter"
         )
     
     with col3:
         sort_by = st.selectbox(
             "Sort by",
             ["Timestamp (Newest)", "Timestamp (Oldest)", "Risk Score (High)", "Risk Score (Low)", "Filename"],
-            key="sort_by"
+            key="analysis_sort_by"
         )
     
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True):
+        # FIXED: Added unique key to prevent duplication
+        if st.button("🔄 Refresh", use_container_width=True, key="analysis_refresh_button"):
             st.rerun()
     
     # Apply filters
@@ -157,8 +166,8 @@ def show_analysis_browser(client, analyses):
     st.markdown(f"**📊 Showing {len(filtered_analyses)} of {len(analyses)} analyses**")
     
     # Analysis cards
-    for analysis in filtered_analyses:
-        show_analysis_card(client, analysis)
+    for i, analysis in enumerate(filtered_analyses):
+        show_analysis_card(client, analysis, i)
 
 
 def filter_analyses(analyses, severity_filter, type_filter):
@@ -190,8 +199,8 @@ def sort_analyses(analyses, sort_by):
         return analyses
 
 
-def show_analysis_card(client, analysis):
-    """Show individual analysis card"""
+def show_analysis_card(client, analysis, card_index):
+    """Show individual analysis card with unique keys"""
     filename = analysis.get("filename", "unknown")
     file_id = analysis.get("file_id", "")
     severity = analysis.get("severity", "LOW")
@@ -200,6 +209,9 @@ def show_analysis_card(client, analysis):
     timestamp = analysis.get("timestamp", "")
     summary = analysis.get("summary", "")
     threat_count = analysis.get("threat_count", 0)
+    
+    # Use card_index to make unique keys
+    unique_prefix = f"card_{card_index}_{file_id[:8]}"
     
     # Card container
     with st.container():
@@ -229,23 +241,23 @@ def show_analysis_card(client, analysis):
         if summary:
             st.markdown(f"**📝 Summary:** {summary}")
         
-        # Action buttons
+        # Action buttons with unique keys
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            if st.button("🔍 View Details", key=f"details_{file_id}"):
+            if st.button("🔍 View Details", key=f"{unique_prefix}_details"):
                 show_detailed_analysis(client, file_id, filename)
         
         with col2:
-            if st.button("🚨 View Threats", key=f"threats_{file_id}"):
+            if st.button("🚨 View Threats", key=f"{unique_prefix}_threats"):
                 show_threats_analysis(client, file_id, filename)
         
         with col3:
-            if st.button("💡 Recommendations", key=f"recs_{file_id}"):
+            if st.button("💡 Recommendations", key=f"{unique_prefix}_recs"):
                 show_recommendations(client, file_id, filename)
         
         with col4:
-            if st.button("🤖 AI Insights", key=f"ai_{file_id}"):
+            if st.button("🤖 AI Insights", key=f"{unique_prefix}_ai"):
                 show_ai_insights(client, file_id, filename)
         
         st.markdown("---")
@@ -260,6 +272,7 @@ def show_detailed_analysis(client, file_id, filename):
     
     if "error" in analysis_data:
         st.error("❌ Could not load detailed analysis")
+        st.info("This might be because the analysis data is not available or the backend API is not properly connected.")
         return
     
     analysis = analysis_data.get("analysis", {})
@@ -312,6 +325,7 @@ def show_threats_analysis(client, file_id, filename):
     
     if "error" in threats_data:
         st.error("❌ Could not load threats data")
+        st.info("Threats data may not be available for this file.")
         return
     
     threats = threats_data.get("threats", [])
@@ -368,6 +382,7 @@ def show_recommendations(client, file_id, filename):
     
     if "error" in recs_data:
         st.error("❌ Could not load recommendations")
+        st.info("Recommendations may not be available for this file.")
         return
     
     recommendations = recs_data.get("recommendations", [])
@@ -391,6 +406,16 @@ def show_ai_insights(client, file_id, filename):
     """Show AI insights for a file"""
     st.subheader(f"🤖 AI Insights: {filename}")
     
+    # Check AI status first
+    ai_status = client.get_ai_status()
+    
+    if "error" in ai_status or not ai_status.get("ai_available", False):
+        st.warning("⚠️ AI features are not available")
+        st.info("To enable AI features, configure your OpenAI API key:")
+        st.code("export OPENAI_API_KEY='your-api-key-here'")
+        st.info("Then restart the backend server.")
+        return
+    
     # Get AI insights
     ai_data = client.get_ai_insights(file_id)
     
@@ -401,7 +426,7 @@ def show_ai_insights(client, file_id, filename):
     if not ai_data.get("ai_insights_available", False):
         st.warning("⚠️ No AI insights available for this file.")
         
-        if st.button("🚀 Generate AI Insights"):
+        if st.button("🚀 Generate AI Insights", key=f"generate_ai_{file_id}"):
             with st.spinner("🤖 Generating AI insights..."):
                 ai_result = client.ai_analyze_file(file_id)
                 
