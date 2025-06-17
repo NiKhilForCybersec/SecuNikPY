@@ -500,3 +500,7 @@ def show_security_score_widget(client):
         st.progress(security_score / 100)
     else:
         st.info("Upload files to see security score")
+def show_dashboard():
+    """Main entry point for dashboard page"""
+    from utils.api_client import get_api_client
+    client = get_api_client()

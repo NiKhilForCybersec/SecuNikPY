@@ -373,3 +373,8 @@ def show_upload_tips():
         - Analysis results are stored locally
         - Enable AI for enhanced threat detection
         """)
+def show_upload_page():
+    """Main entry point for file upload page"""
+    from utils.api_client import get_api_client
+    client = get_api_client()
+    

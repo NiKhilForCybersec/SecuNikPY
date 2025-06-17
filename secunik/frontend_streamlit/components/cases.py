@@ -526,3 +526,8 @@ def save_cases(cases):
             json.dump(cases, f, indent=2, default=str)
     except Exception as e:
         st.error(f"Error saving cases: {e}")
+def show_cases_page():
+    """Main entry point for cases page"""
+    from utils.api_client import get_api_client
+    client = get_api_client()
+    

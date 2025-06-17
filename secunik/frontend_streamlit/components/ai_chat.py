@@ -378,3 +378,8 @@ if __name__ == "__main__":
         layout="wide"
     )
     main()
+def show_ai_chat():
+    """Main entry point for AI chat page - wrapper for render_ai_chat"""
+    from utils.api_client import get_api_client
+    client = get_api_client()
+    render_ai_chat(client)

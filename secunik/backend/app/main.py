@@ -18,6 +18,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from enum import Enum
 from dotenv import load_dotenv
+from app.api import upload, analysis, dashboard, ai
+from app.models.analysis import AnalysisResult, ThreatSeverity
+import backend.app as app
+
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,6 +30,12 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# IMPORTANT: Register all routers AFTER app creation
+app.include_router(upload.router)
+app.include_router(analysis.router)
+app.include_router(dashboard.router)
+app.include_router(ai.router)
 
 # Get the correct directory structure
 current_dir = Path(__file__).parent  # backend/app/

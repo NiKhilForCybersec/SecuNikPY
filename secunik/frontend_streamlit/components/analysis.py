@@ -504,3 +504,7 @@ def show_analysis_statistics():
         st.markdown("**🔧 Analysis Types:**")
         for analysis_type, count in by_type.items():
             st.write(f"• **{analysis_type.title()}:** {count}")
+def show_analysis_page():
+    """Main entry point for analysis page"""
+    from utils.api_client import get_api_client
+    client = get_api_client()

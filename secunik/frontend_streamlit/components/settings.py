@@ -613,3 +613,7 @@ def show_system_info():
             st.write(f"• Models: {'✅ Available' if health.get('models_available') else '⚠️ Basic'}")
         else:
             st.write("• Backend: ❌ Offline")
+def show_settings_page():
+    """Main entry point for settings page"""
+    from utils.api_client import get_api_client
+    client = get_api_client()
