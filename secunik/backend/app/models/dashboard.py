@@ -2,6 +2,10 @@
 Dashboard data models
 """
 
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from pydantic import BaseModel, Field
+
 class DashboardStats(BaseModel):
     """Dashboard statistics"""
     total_cases: int = 0
