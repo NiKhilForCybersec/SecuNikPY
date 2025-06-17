@@ -13,7 +13,7 @@ from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 
-# Import models with fallback
+# Import models with proper path
 try:
     from models.analysis import AnalysisResult, AnalysisStatus, Severity
 except ImportError:
@@ -53,6 +53,8 @@ RESULTS_DIR = current_dir / "data" / "results"
 # Ensure directories exist
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ... rest of the file remains the same ...
 
 def get_file_hash(file_content: bytes) -> str:
     """Generate SHA256 hash of file content"""

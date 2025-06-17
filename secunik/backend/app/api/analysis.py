@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-# Import models with fallback
+# Import models with proper path
 try:
     from models.analysis import AnalysisResult, AnalysisStatus, Severity
 except ImportError:
@@ -41,6 +41,8 @@ UPLOAD_DIR = current_dir / "data" / "uploads"
 # Ensure directories exist
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+# ... rest of the file remains the same ...
 
 class AnalysisRequest(BaseModel):
     """Request model for analysis operations"""

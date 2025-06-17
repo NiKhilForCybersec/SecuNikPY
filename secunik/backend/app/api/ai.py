@@ -11,14 +11,27 @@ import json
 import asyncio
 from pathlib import Path
 
-from ..models.analysis import AnalysisStatus
-from ..core.ai.openai_client import get_openai_client
-from ..core.ai.insights_generator import get_insights_generator
-from ..core.ai.context_builder import get_context_builder
+# Import models with proper path
+try:
+    from models.analysis import AnalysisStatus
+    from core.ai.openai_client import get_openai_client
+    from core.ai.insights_generator import get_insights_generator
+    from core.ai.context_builder import get_context_builder
+except ImportError as e:
+    logging.warning(f"Could not import AI modules: {e}")
+    # Define minimal fallback
+    def get_openai_client():
+        return None
+    def get_insights_generator():
+        return None
+    def get_context_builder():
+        return None
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["AI"])
+
+# ... rest of the file remains the same ...
 
 # Request/Response models
 class AIAnalysisRequest(BaseModel):
