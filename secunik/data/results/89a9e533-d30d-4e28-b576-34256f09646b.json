@@ -1,0 +1,20 @@
+{
+  "file_id": "89a9e533-d30d-4e28-b576-34256f09646b",
+  "filename": "ftp.log",
+  "file_path": "N:\\Project\\SecuNikPY\\secunik\\data\\uploads\\fb9efa1a-8e6d-4862-a7d7-962df4f9e0be.log",
+  "parser_name": "basic_analyzer",
+  "analysis_type": "basic",
+  "timestamp": "2025-06-17 12:31:26.396086",
+  "summary": "Basic analysis of ftp.log completed. Risk level: LOW",
+  "details": {
+    "original_filename": "ftp.log",
+    "file_size": 1706614,
+    "file_extension": ".log",
+    "file_type": "unknown"
+  },
+  "threats_detected": [],
+  "severity": "LOW",
+  "risk_score": 0.1,
+  "recommendations": [],
+  "threat_count": 0
+}
