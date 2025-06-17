@@ -29,7 +29,7 @@ try:
 except ImportError:
     EML_PARSER_AVAILABLE = False
 
-from ....models.analysis import AnalysisResult, Severity, IOC, IOCType
+from ...models.analysis import AnalysisResult, Severity, IOC, IOCType
 
 logger = logging.getLogger(__name__)
 
