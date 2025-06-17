@@ -3,7 +3,7 @@ Analysis result data models
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -23,12 +23,21 @@ class ThreatLevel(str, Enum):
     HIGH = "high"
     CRITICAL = "critical"
 
+# New severity enumeration used across the AI modules
+class Severity(str, Enum):
+    """General severity levels"""
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
 class IOCType(str, Enum):
     """Indicator of Compromise types"""
     IP_ADDRESS = "ip_address"
     DOMAIN = "domain"
-    EMAIL = "email"
+    EMAIL_ADDRESS = "email_address"
     URL = "url"
+    FILE_HASH = "file_hash"
     HASH_MD5 = "hash_md5"
     HASH_SHA1 = "hash_sha1"
     HASH_SHA256 = "hash_sha256"
@@ -39,15 +48,17 @@ class IOCType(str, Enum):
     USER_AGENT = "user_agent"
     USERNAME = "username"
 
-class IOCIndicator(BaseModel):
-    """Individual IOC indicator"""
+class IOC(BaseModel):
+    """Indicator of Compromise as extracted by parsers"""
     type: IOCType
     value: str
     confidence: float = Field(ge=0.0, le=1.0, description="Confidence score 0-1")
-    context: Optional[str] = Field(None, description="Context where IOC was found")
-    threat_level: ThreatLevel = ThreatLevel.LOW
+    source: Optional[str] = Field(None, description="Source where IOC was found")
+    description: Optional[str] = Field(None, description="Context or description of IOC")
     first_seen: datetime = Field(default_factory=datetime.utcnow)
-    source: Optional[str] = Field(None, description="Source of the IOC")
+
+# Backwards compatibility
+IOCIndicator = IOC
 
 class BasicFileInfo(BaseModel):
     """Basic file information"""
@@ -75,48 +86,21 @@ class AnalysisMetrics(BaseModel):
     threats_detected: int = 0
 
 class AnalysisResult(BaseModel):
-    """Complete analysis result"""
-    # Identification
-    file_id: str = Field(..., description="Unique file identifier")
-    case_id: str = Field(..., description="Associated case ID")
-    
-    # File information
-    filename: str
-    file_type: str
-    file_size: int
-    file_path: Optional[str] = None
-    file_hash: Optional[str] = None
-    
-    # Timestamps
-    upload_timestamp: datetime = Field(default_factory=datetime.utcnow)
-    analysis_start: Optional[datetime] = None
-    analysis_end: Optional[datetime] = None
-    
-    # Status
-    status: AnalysisStatus = AnalysisStatus.UPLOADED
-    error_message: Optional[str] = None
-    
-    # Analysis results
-    basic_info: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    iocs: List[IOCIndicator] = Field(default_factory=list)
-    threat_assessment: Optional[ThreatAssessment] = None
-    
-    # Detailed analysis data
-    parser_results: Dict[str, Any] = Field(default_factory=dict)
-    ai_insights: Optional[Dict[str, Any]] = None
-    correlations: List[str] = Field(default_factory=list)
-    
-    # Metrics
-    metrics: Optional[AnalysisMetrics] = None
-    
-    # Additional data
-    tags: List[str] = Field(default_factory=list)
-    notes: Optional[str] = None
-    
+    """Simplified analysis result used by parsers and AI modules"""
+    file_path: str
+    parser_name: str
+    analysis_type: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    summary: Optional[str] = ""
+    details: Dict[str, Any] = Field(default_factory=dict)
+    threats_detected: List[Dict[str, Any]] = Field(default_factory=list)
+    iocs_found: List[IOC] = Field(default_factory=list)
+    severity: Severity = Severity.LOW
+    risk_score: float = 0.0
+    recommendations: List[str] = Field(default_factory=list)
+
     class Config:
-        json_encoders = {
-            datetime: lambda dt: dt.isoformat()
-        }
+        json_encoders = {datetime: lambda dt: dt.isoformat()}
 
 class AnalysisSummary(BaseModel):
     """Analysis summary for dashboards"""
@@ -128,3 +112,4 @@ class AnalysisSummary(BaseModel):
     risk_score: float
     ioc_count: int
     analysis_timestamp: Optional[datetime]
+
