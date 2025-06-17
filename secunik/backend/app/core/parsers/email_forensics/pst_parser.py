@@ -1,707 +1,578 @@
 """
-SecuNik - Email Forensics Parser (PST/EML) - Pure Data Extractor
-Extracts raw email data for AI analysis
-
-Location: backend/app/core/parsers/email_forensics/pst_parser.py
+PST (Personal Storage Table) parser for SecuNik
+Analyzes Outlook PST files for security threats and IOCs
 """
 
 import json
-import email
 import logging
-import re
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, Any, List, Optional, Set
 from pathlib import Path
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import base64
-import quopri
+import pypff
+import email
+from email import policy
+from email.parser import BytesParser
+import re
+from collections import defaultdict, Counter
+import hashlib
 
-try:
-    import libpst
-    PST_AVAILABLE = True
-except ImportError:
-    PST_AVAILABLE = False
-
-try:
-    import eml_parser
-    EML_PARSER_AVAILABLE = True
-except ImportError:
-    EML_PARSER_AVAILABLE = False
-
-from ...models.analysis import AnalysisResult, Severity, IOC, IOCType
+from ....models.analysis import (
+    AnalysisResult, IOC, IOCType, Severity, ThreatInfo
+)
+from ..base.abstract_parser import AbstractParser
 
 logger = logging.getLogger(__name__)
 
-class EmailForensicsParser:
-    """Pure Data Extractor for Email Forensics - AI analyzes the data"""
+class PSTParser(AbstractParser):
+    """Parser for Outlook PST files"""
+    
+    name = "PST Email Parser"
+    supported_extensions = [".pst", ".ost"]
     
     def __init__(self):
-        self.name = "Email Forensics Parser"
-        self.version = "2.0.0"
-        self.supported_formats = [".pst", ".ost", ".eml", ".msg"]
-        
-        # Regular expressions for data extraction (not threat assessment)
-        self.regex_patterns = {
-            "email": re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'),
-            "ip": re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'),
-            "url": re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'),
-            "phone": re.compile(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'),
-            "credit_card": re.compile(r'\b(?:\d{4}[-\s]?){3}\d{4}\b'),
-            "ssn": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
-            "bitcoin": re.compile(r'\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b')
+        super().__init__()
+        self.suspicious_patterns = {
+            "phishing_keywords": [
+                "urgent", "verify your account", "suspended", "click here immediately",
+                "confirm your identity", "update your information", "verify your email",
+                "security alert", "unusual activity", "temporary suspension"
+            ],
+            "malware_indicators": [
+                ".exe", ".scr", ".vbs", ".bat", ".cmd", ".com", ".pif",
+                ".zip", ".rar", ".7z", "password protected", "encrypted attachment"
+            ],
+            "suspicious_senders": [
+                "no-reply", "noreply", "do-not-reply", "notification", "alert",
+                "security", "support", "admin", "administrator"
+            ]
         }
         
-        # Security headers to analyze
-        self.security_headers = [
-            "Authentication-Results",
-            "Received-SPF", 
-            "DKIM-Signature",
-            "ARC-Authentication-Results",
-            "X-Spam-Status",
-            "X-Spam-Score",
-            "X-Virus-Scan-Result"
-        ]
-
-    def can_parse(self, file_path: str) -> bool:
-        """Check if file can be parsed by this parser"""
-        extension = Path(file_path).suffix.lower()
-        if extension == ".pst" or extension == ".ost":
-            return PST_AVAILABLE
-        elif extension == ".eml":
-            return True
-        return extension in self.supported_formats
-
-    def parse(self, file_path: str) -> AnalysisResult:
-        """Extract raw email data - AI will analyze for threats"""
+        # Email header patterns for analysis
+        self.header_patterns = {
+            "spoofed_sender": re.compile(r'From:.*?<(.+?)>.*?Reply-To:.*?<(.+?)>', re.IGNORECASE | re.DOTALL),
+            "suspicious_received": re.compile(r'Received:.*?(\d+\.\d+\.\d+\.\d+)', re.IGNORECASE),
+            "x_mailer": re.compile(r'X-Mailer:\s*(.+?)(?:\r?\n|\r)', re.IGNORECASE),
+            "authentication_results": re.compile(r'Authentication-Results:.*?spf=(\w+)', re.IGNORECASE)
+        }
+    
+    async def parse(self, file_path: str) -> Dict[str, Any]:
+        """Parse PST file and extract email data"""
         try:
-            extension = Path(file_path).suffix.lower()
+            pst = pypff.file()
+            pst.open(file_path)
             
-            logger.info(f"Extracting email data: {file_path}")
+            email_data = {
+                "total_messages": 0,
+                "folders": [],
+                "messages": [],
+                "attachments": [],
+                "suspicious_emails": [],
+                "sender_analysis": defaultdict(int),
+                "recipient_analysis": defaultdict(int),
+                "timeline": [],
+                "attachment_analysis": defaultdict(int)
+            }
             
-            if extension in [".pst", ".ost"]:
-                emails = self._parse_pst_file(file_path)
-            elif extension == ".eml":
-                emails = self._parse_eml_file(file_path)
-            else:
-                return self._create_error_result(f"Unsupported email format: {extension}")
+            # Process root folder
+            root = pst.get_root_folder()
+            await self._process_folder(root, email_data, "")
             
-            # Extract structured email data
-            email_data = self._extract_email_data(emails)
+            pst.close()
             
-            # Extract factual IOCs
-            iocs = self._extract_factual_iocs(email_data, emails)
-            
-            # Create analysis result with extracted data
-            result = AnalysisResult(
-                file_path=file_path,
-                parser_name=self.name,
-                analysis_type="Email Data Extraction",
-                timestamp=datetime.now(),
-                summary=f"Extracted data from {len(emails)} emails for AI analysis",
-                details=email_data,
-                threats_detected=[],  # AI will determine threats
-                iocs_found=iocs,
-                severity=Severity.LOW,  # AI will determine severity
-                risk_score=0.0,  # AI will calculate risk score
-                recommendations=["Data extracted - pending AI analysis for threat assessment and recommendations"]
+            # Post-processing
+            email_data["sender_analysis"] = dict(
+                sorted(email_data["sender_analysis"].items(), 
+                       key=lambda x: x[1], reverse=True)[:20]
             )
+            email_data["recipient_analysis"] = dict(
+                sorted(email_data["recipient_analysis"].items(), 
+                       key=lambda x: x[1], reverse=True)[:20]
+            )
+            email_data["attachment_analysis"] = dict(email_data["attachment_analysis"])
             
-            logger.info(f"Email data extraction completed: {len(emails)} emails processed")
-            return result
+            # Limit stored messages to prevent memory issues
+            email_data["messages"] = email_data["messages"][:100]
+            email_data["timeline"] = sorted(
+                email_data["timeline"], 
+                key=lambda x: x["timestamp"], 
+                reverse=True
+            )[:100]
+            
+            return {
+                "extraction_successful": True,
+                "email_data": email_data
+            }
             
         except Exception as e:
-            logger.error(f"Error extracting email data {file_path}: {str(e)}")
-            return self._create_error_result(str(e))
-
-    def _parse_pst_file(self, file_path: str) -> List[Dict[str, Any]]:
-        """Parse PST/OST file"""
-        emails = []
-        
-        if not PST_AVAILABLE:
-            logger.warning("libpst not available, cannot parse PST files")
-            return emails
-        
+            logger.error(f"Failed to parse PST file: {str(e)}")
+            return {
+                "extraction_successful": False,
+                "error": str(e)
+            }
+    
+    async def _process_folder(self, folder, email_data: Dict[str, Any], path: str):
+        """Recursively process PST folders"""
         try:
-            # This is a simplified version - actual PST parsing would require
-            # more complex implementation with libpst
-            logger.warning("PST parsing requires libpst library - using placeholder")
-            return emails
-        except Exception as e:
-            logger.error(f"Error parsing PST file: {e}")
-            return emails
-
-    def _parse_eml_file(self, file_path: str) -> List[Dict[str, Any]]:
-        """Parse EML file"""
-        emails = []
-        
-        try:
-            with open(file_path, 'rb') as f:
-                raw_email = f.read()
+            folder_name = folder.name or "Root"
+            current_path = f"{path}/{folder_name}" if path else folder_name
             
-            # Parse with email library
-            msg = email.message_from_bytes(raw_email)
-            email_data = self._extract_email_message_data(msg, file_path)
-            emails.append(email_data)
+            folder_info = {
+                "name": folder_name,
+                "path": current_path,
+                "message_count": folder.number_of_sub_messages
+            }
+            email_data["folders"].append(folder_info)
             
-            # Also try eml_parser if available
-            if EML_PARSER_AVAILABLE:
+            # Process messages in folder
+            for i in range(folder.number_of_sub_messages):
                 try:
-                    ep = eml_parser.EmlParser()
-                    parsed = ep.decode_email_bytes(raw_email)
-                    if parsed:
-                        email_data["eml_parser_data"] = parsed
+                    message = folder.get_sub_message(i)
+                    await self._process_message(message, email_data, current_path)
                 except Exception as e:
-                    logger.warning(f"eml_parser failed: {e}")
+                    logger.warning(f"Failed to process message {i}: {str(e)}")
+            
+            # Process subfolders
+            for i in range(folder.number_of_sub_folders):
+                try:
+                    subfolder = folder.get_sub_folder(i)
+                    await self._process_folder(subfolder, email_data, current_path)
+                except Exception as e:
+                    logger.warning(f"Failed to process subfolder {i}: {str(e)}")
+                    
+        except Exception as e:
+            logger.error(f"Error processing folder: {str(e)}")
+    
+    async def _process_message(self, message, email_data: Dict[str, Any], folder_path: str):
+        """Process individual email message"""
+        try:
+            email_data["total_messages"] += 1
+            
+            # Extract basic message info
+            subject = message.subject or "No Subject"
+            sender = message.sender_name or "Unknown"
+            
+            # Get timestamps
+            delivery_time = None
+            if hasattr(message, 'delivery_time') and message.delivery_time:
+                delivery_time = message.delivery_time
+            elif hasattr(message, 'client_submit_time') and message.client_submit_time:
+                delivery_time = message.client_submit_time
+            
+            timestamp = delivery_time.isoformat() if delivery_time else "Unknown"
+            
+            # Extract recipients
+            recipients = []
+            if hasattr(message, 'number_of_recipients'):
+                for i in range(message.number_of_recipients):
+                    try:
+                        recipient = message.get_recipient(i)
+                        recipients.append(recipient.email_address or recipient.name)
+                    except:
+                        pass
+            
+            # Get message body
+            body = ""
+            if hasattr(message, 'plain_text_body'):
+                body = str(message.plain_text_body) if message.plain_text_body else ""
+            elif hasattr(message, 'html_body'):
+                body = str(message.html_body) if message.html_body else ""
+            
+            # Get headers
+            headers = {}
+            if hasattr(message, 'transport_headers'):
+                header_text = str(message.transport_headers) if message.transport_headers else ""
+                headers = self._parse_headers(header_text)
+            
+            message_info = {
+                "subject": subject,
+                "sender": sender,
+                "recipients": recipients,
+                "timestamp": timestamp,
+                "folder": folder_path,
+                "has_attachments": message.number_of_attachments > 0,
+                "attachment_count": message.number_of_attachments,
+                "body_preview": body[:200] if body else "",
+                "headers": headers
+            }
+            
+            # Track sender/recipient statistics
+            email_data["sender_analysis"][sender] += 1
+            for recipient in recipients:
+                email_data["recipient_analysis"][recipient] += 1
+            
+            # Add to timeline
+            if delivery_time:
+                email_data["timeline"].append({
+                    "timestamp": timestamp,
+                    "subject": subject,
+                    "sender": sender,
+                    "event": "email_received"
+                })
+            
+            # Process attachments
+            if message.number_of_attachments > 0:
+                attachments = await self._process_attachments(message, email_data)
+                message_info["attachments"] = attachments
+            
+            # Check for suspicious content
+            suspicion_score = self._analyze_suspicious_content(message_info, body)
+            if suspicion_score > 0.5:
+                message_info["suspicion_score"] = suspicion_score
+                email_data["suspicious_emails"].append(message_info)
+            
+            # Store message info
+            email_data["messages"].append(message_info)
             
         except Exception as e:
-            logger.error(f"Error parsing EML file: {e}")
+            logger.warning(f"Error processing message: {str(e)}")
+    
+    async def _process_attachments(self, message, email_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Process email attachments"""
+        attachments = []
         
-        return emails
-
-    def _extract_email_message_data(self, msg, file_path: str) -> Dict[str, Any]:
-        """Extract comprehensive data from email message"""
-        email_data = {
-            "file_path": file_path,
-            "message_id": msg.get("Message-ID", ""),
-            "subject": msg.get("Subject", ""),
-            "from": msg.get("From", ""),
-            "to": msg.get("To", ""),
-            "cc": msg.get("Cc", ""),
-            "bcc": msg.get("Bcc", ""),
-            "date": msg.get("Date", ""),
-            "received": [],
-            "headers": dict(msg.items()),
-            "body_text": "",
-            "body_html": "",
-            "attachments": [],
-            "urls": [],
-            "security_headers": {},
-            "routing_info": []
-        }
-        
-        # Parse date
-        try:
-            if email_data["date"]:
-                email_data["parsed_date"] = email.utils.parsedate_to_datetime(email_data["date"])
-        except Exception:
-            email_data["parsed_date"] = None
-        
-        # Extract Received headers for routing analysis
-        received_headers = msg.get_all("Received", [])
-        email_data["received"] = received_headers
-        email_data["routing_info"] = self._parse_routing_info(received_headers)
-        
-        # Extract security headers
-        for header in self.security_headers:
-            value = msg.get(header)
-            if value:
-                email_data["security_headers"][header] = value
-        
-        # Extract body content
-        if msg.is_multipart():
-            for part in msg.walk():
-                self._process_email_part(part, email_data)
-        else:
-            self._process_email_part(msg, email_data)
-        
-        # Extract URLs from all text content
-        all_text = email_data["body_text"] + " " + email_data["body_html"]
-        email_data["urls"] = self._extract_urls(all_text)
-        
-        # Extract additional patterns
-        email_data["extracted_patterns"] = self._extract_all_patterns(all_text)
-        
-        return email_data
-
-    def _process_email_part(self, part, email_data: Dict[str, Any]):
-        """Process individual email part (body, attachment, etc.)"""
-        content_type = part.get_content_type()
-        content_disposition = part.get("Content-Disposition", "")
-        
-        if "attachment" in content_disposition or "inline" in content_disposition:
-            # Handle attachment
-            filename = part.get_filename()
-            if filename:
-                attachment_data = {
+        for i in range(message.number_of_attachments):
+            try:
+                attachment = message.get_attachment(i)
+                
+                # Get attachment info
+                filename = attachment.name or f"attachment_{i}"
+                size = attachment.size if hasattr(attachment, 'size') else 0
+                
+                # Calculate hash if possible
+                file_hash = ""
+                if hasattr(attachment, 'read'):
+                    try:
+                        data = attachment.read()
+                        file_hash = hashlib.sha256(data).hexdigest()
+                    except:
+                        pass
+                
+                # Determine file type
+                file_ext = Path(filename).suffix.lower()
+                
+                attachment_info = {
                     "filename": filename,
-                    "content_type": content_type,
-                    "size": len(part.get_payload(decode=True) or b""),
-                    "content_disposition": content_disposition
+                    "size": size,
+                    "extension": file_ext,
+                    "hash": file_hash
                 }
                 
-                # Extract attachment content for analysis (limited size)
-                try:
-                    payload = part.get_payload(decode=True)
-                    if payload and len(payload) < 1024 * 1024:  # Limit to 1MB
-                        attachment_data["content_preview"] = payload[:1000]  # First 1000 bytes
-                        attachment_data["file_hash"] = self._calculate_hash(payload)
-                except Exception as e:
-                    logger.warning(f"Error extracting attachment content: {e}")
+                attachments.append(attachment_info)
+                email_data["attachments"].append(attachment_info)
+                email_data["attachment_analysis"][file_ext] += 1
                 
-                email_data["attachments"].append(attachment_data)
-        
-        elif content_type == "text/plain":
-            # Plain text body
-            try:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    email_data["body_text"] += payload.decode('utf-8', errors='ignore')
             except Exception as e:
-                logger.warning(f"Error decoding text part: {e}")
+                logger.warning(f"Error processing attachment {i}: {str(e)}")
         
-        elif content_type == "text/html":
-            # HTML body
-            try:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    email_data["body_html"] += payload.decode('utf-8', errors='ignore')
-            except Exception as e:
-                logger.warning(f"Error decoding HTML part: {e}")
-
-    def _parse_routing_info(self, received_headers: List[str]) -> List[Dict[str, Any]]:
-        """Parse email routing information from Received headers"""
-        routing_info = []
+        return attachments
+    
+    def _parse_headers(self, header_text: str) -> Dict[str, str]:
+        """Parse email headers"""
+        headers = {}
         
-        for header in received_headers:
-            route_data = {
-                "raw_header": header,
-                "servers": [],
-                "ips": [],
-                "timestamp": None
-            }
-            
-            # Extract IP addresses
-            ips = self.regex_patterns["ip"].findall(header)
-            route_data["ips"] = ips
-            
-            # Extract server names
-            if "from" in header.lower():
-                try:
-                    parts = header.split("from")[1].split("by")[0]
-                    route_data["servers"].append(parts.strip())
-                except Exception:
-                    pass
-            
-            # Extract timestamp
-            if ";" in header:
-                timestamp_part = header.split(";")[-1].strip()
-                try:
-                    route_data["timestamp"] = email.utils.parsedate_to_datetime(timestamp_part)
-                except Exception:
-                    pass
-            
-            routing_info.append(route_data)
-        
-        return routing_info
-
-    def _extract_urls(self, text: str) -> List[Dict[str, Any]]:
-        """Extract URLs from text"""
-        urls = []
-        
-        for match in self.regex_patterns["url"].finditer(text):
-            url = match.group()
-            url_data = {
-                "url": url,
-                "domain": self._extract_domain(url)
-            }
-            urls.append(url_data)
-        
-        return urls
-
-    def _extract_domain(self, url: str) -> str:
-        """Extract domain from URL"""
         try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            return parsed.netloc
-        except Exception:
-            return ""
-
-    def _extract_all_patterns(self, text: str) -> Dict[str, List[str]]:
-        """Extract all patterns from text content"""
-        patterns = {}
+            # Parse key headers
+            for line in header_text.split('\n'):
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    
+                    if key in ['from', 'to', 'subject', 'date', 'message-id', 
+                              'return-path', 'reply-to', 'x-mailer', 
+                              'authentication-results', 'received-spf']:
+                        headers[key] = value
+        except:
+            pass
         
-        for pattern_name, regex in self.regex_patterns.items():
-            matches = regex.findall(text)
-            if matches:
-                patterns[pattern_name] = matches[:20]  # Limit matches
+        return headers
+    
+    def _analyze_suspicious_content(self, message_info: Dict[str, Any], body: str) -> float:
+        """Analyze email for suspicious content"""
+        suspicion_score = 0.0
+        factors = []
         
-        return patterns
-
-    def _calculate_hash(self, data: bytes) -> str:
-        """Calculate SHA-256 hash of data"""
-        import hashlib
-        return hashlib.sha256(data).hexdigest()
-
-    def _extract_email_data(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Extract structured data from all emails"""
-        email_data = {
-            "total_emails": len(emails),
-            "email_summary": self._build_email_summary(emails),
-            "sender_analysis": self._analyze_senders(emails),
-            "recipient_analysis": self._analyze_recipients(emails),
-            "attachment_analysis": self._analyze_attachments(emails),
-            "content_analysis": self._analyze_content(emails),
-            "header_analysis": self._analyze_headers(emails),
-            "timeline": self._build_email_timeline(emails),
-            "communication_patterns": self._analyze_communication_patterns(emails),
-            "metadata_analysis": self._analyze_metadata(emails)
-        }
+        # Check subject and body for phishing keywords
+        content = (message_info["subject"] + " " + body).lower()
+        phishing_count = sum(1 for keyword in self.suspicious_patterns["phishing_keywords"] 
+                           if keyword in content)
+        if phishing_count > 0:
+            suspicion_score += min(phishing_count * 0.15, 0.5)
+            factors.append("phishing_keywords")
         
-        return email_data
-
-    def _build_email_summary(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Build summary statistics"""
-        if not emails:
-            return {}
+        # Check for suspicious attachments
+        if message_info.get("attachments"):
+            for att in message_info["attachments"]:
+                ext = att.get("extension", "").lower()
+                if ext in [".exe", ".scr", ".vbs", ".bat", ".cmd", ".com", ".pif"]:
+                    suspicion_score += 0.3
+                    factors.append("executable_attachment")
+                elif ext in [".zip", ".rar", ".7z"] and "password" in content:
+                    suspicion_score += 0.2
+                    factors.append("encrypted_archive")
         
-        summary = {
-            "total_emails": len(emails),
-            "date_range": self._get_date_range(emails),
-            "emails_with_attachments": len([e for e in emails if e.get("attachments")]),
-            "total_attachments": sum(len(e.get("attachments", [])) for e in emails),
-            "emails_with_urls": len([e for e in emails if e.get("urls")]),
-            "total_urls": sum(len(e.get("urls", [])) for e in emails),
-            "unique_senders": len(set(e.get("from", "") for e in emails if e.get("from"))),
-            "unique_subjects": len(set(e.get("subject", "") for e in emails if e.get("subject")))
-        }
+        # Check sender patterns
+        sender = message_info["sender"].lower()
+        if any(pattern in sender for pattern in self.suspicious_patterns["suspicious_senders"]):
+            suspicion_score += 0.1
+            factors.append("suspicious_sender")
+        
+        # Check for header anomalies
+        headers = message_info.get("headers", {})
+        if headers.get("from", "") != headers.get("return-path", ""):
+            suspicion_score += 0.1
+            factors.append("sender_mismatch")
+        
+        if headers.get("authentication-results") and "fail" in headers["authentication-results"]:
+            suspicion_score += 0.2
+            factors.append("spf_fail")
+        
+        # Check for URL patterns
+        url_pattern = re.compile(r'https?://[^\s]+')
+        urls = url_pattern.findall(body)
+        if len(urls) > 5:
+            suspicion_score += 0.1
+            factors.append("many_urls")
+        
+        # Shortened URLs
+        shortened_domains = ["bit.ly", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly"]
+        if any(domain in body for domain in shortened_domains):
+            suspicion_score += 0.15
+            factors.append("shortened_urls")
+        
+        message_info["suspicion_factors"] = factors
+        return min(suspicion_score, 1.0)
+    
+    async def analyze(self, file_path: str, extracted_data: Dict[str, Any]) -> AnalysisResult:
+        """Analyze PST data for threats"""
+        if not extracted_data.get("extraction_successful"):
+            return self._create_error_result(extracted_data.get("error", "Unknown error"))
+        
+        email_data = extracted_data.get("email_data", {})
+        threats = []
+        severity = Severity.LOW
+        risk_score = 0.2
+        
+        # Analyze suspicious emails
+        suspicious_emails = email_data.get("suspicious_emails", [])
+        if suspicious_emails:
+            # Group by suspicion factors
+            factor_counts = defaultdict(int)
+            for email in suspicious_emails:
+                for factor in email.get("suspicion_factors", []):
+                    factor_counts[factor] += 1
+            
+            # Phishing threats
+            if factor_counts.get("phishing_keywords", 0) > 5:
+                threats.append(ThreatInfo(
+                    threat_type="Phishing Campaign",
+                    description=f"Multiple emails with phishing indicators detected",
+                    severity=Severity.HIGH,
+                    confidence=0.85,
+                    evidence={
+                        "phishing_emails": len([e for e in suspicious_emails 
+                                              if "phishing_keywords" in e.get("suspicion_factors", [])])
+                    }
+                ))
+                severity = Severity.HIGH
+                risk_score = max(risk_score, 0.8)
+            
+            # Malware threats
+            if factor_counts.get("executable_attachment", 0) > 0:
+                threats.append(ThreatInfo(
+                    threat_type="Potential Malware",
+                    description="Emails with executable attachments detected",
+                    severity=Severity.HIGH,
+                    confidence=0.9,
+                    evidence={
+                        "malware_emails": len([e for e in suspicious_emails 
+                                             if "executable_attachment" in e.get("suspicion_factors", [])])
+                    }
+                ))
+                severity = Severity.HIGH
+                risk_score = max(risk_score, 0.85)
+            
+            # Sender spoofing
+            if factor_counts.get("sender_mismatch", 0) > 3:
+                threats.append(ThreatInfo(
+                    threat_type="Email Spoofing",
+                    description="Multiple emails with sender verification failures",
+                    severity=Severity.MEDIUM,
+                    confidence=0.7,
+                    evidence={
+                        "spoofed_emails": factor_counts["sender_mismatch"]
+                    }
+                ))
+                if severity == Severity.LOW:
+                    severity = Severity.MEDIUM
+                risk_score = max(risk_score, 0.6)
+        
+        # Extract IOCs
+        iocs = self._extract_iocs(email_data)
+        
+        # Generate summary
+        summary = self._generate_summary(email_data, threats)
+        
+        # Recommendations
+        recommendations = self._generate_recommendations(threats, email_data)
+        
+        return AnalysisResult(
+            file_path=file_path,
+            parser_name=self.name,
+            analysis_type="Email Forensic Analysis",
+            timestamp=datetime.now(),
+            summary=summary,
+            details={
+                "total_messages": email_data.get("total_messages", 0),
+                "total_folders": len(email_data.get("folders", [])),
+                "suspicious_emails": len(suspicious_emails),
+                "total_attachments": len(email_data.get("attachments", [])),
+                "top_senders": list(email_data.get("sender_analysis", {}).items())[:5],
+                "top_recipients": list(email_data.get("recipient_analysis", {}).items())[:5],
+                "attachment_types": email_data.get("attachment_analysis", {})
+            },
+            threats_detected=threats,
+            iocs_found=iocs,
+            severity=severity,
+            risk_score=risk_score,
+            recommendations=recommendations
+        )
+    
+    def _generate_summary(self, email_data: Dict[str, Any], threats: List[ThreatInfo]) -> str:
+        """Generate analysis summary"""
+        total = email_data.get("total_messages", 0)
+        suspicious = len(email_data.get("suspicious_emails", []))
+        attachments = len(email_data.get("attachments", []))
+        
+        summary = f"Analyzed {total} emails across {len(email_data.get('folders', []))} folders. "
+        
+        if suspicious > 0:
+            summary += f"Found {suspicious} suspicious emails. "
+        
+        if attachments > 0:
+            summary += f"Processed {attachments} attachments. "
+        
+        if threats:
+            summary += f"Detected {len(threats)} potential threats. "
+        else:
+            summary += "No significant threats detected. "
         
         return summary
-
-    def _get_date_range(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Get date range of emails"""
-        dates = []
-        for email_data in emails:
-            parsed_date = email_data.get("parsed_date")
-            if parsed_date:
-                dates.append(parsed_date)
+    
+    def _generate_recommendations(self, threats: List[ThreatInfo], email_data: Dict[str, Any]) -> List[str]:
+        """Generate security recommendations"""
+        recommendations = []
         
-        if dates:
-            return {
-                "earliest": min(dates).isoformat(),
-                "latest": max(dates).isoformat(),
-                "span_days": (max(dates) - min(dates)).days
-            }
-        return {}
-
-    def _analyze_senders(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Analyze email senders"""
-        sender_stats = {
-            "unique_senders": set(),
-            "sender_frequency": {},
-            "sender_domains": set(),
-            "external_senders": []
-        }
+        if any(t.threat_type == "Phishing Campaign" for t in threats):
+            recommendations.append("Implement advanced email filtering and anti-phishing solutions")
+            recommendations.append("Conduct user awareness training on phishing identification")
+            recommendations.append("Enable multi-factor authentication for all accounts")
         
-        for email_data in emails:
-            sender = email_data.get("from", "")
-            if sender:
-                sender_stats["unique_senders"].add(sender)
-                sender_stats["sender_frequency"][sender] = sender_stats["sender_frequency"].get(sender, 0) + 1
-                
-                # Extract domain
-                if "@" in sender:
-                    domain = sender.split("@")[-1].split(">")[0]
-                    sender_stats["sender_domains"].add(domain)
-                    
-                    # Check if external (simple heuristic)
-                    if not any(internal in domain for internal in ["company.com", "organization.org"]):
-                        sender_stats["external_senders"].append(sender)
+        if any(t.threat_type == "Potential Malware" for t in threats):
+            recommendations.append("Scan all executable attachments with updated antivirus")
+            recommendations.append("Block executable file types in email gateway")
+            recommendations.append("Implement sandboxing for suspicious attachments")
         
-        return {
-            "total_unique_senders": len(sender_stats["unique_senders"]),
-            "top_senders": dict(sorted(sender_stats["sender_frequency"].items(), 
-                                     key=lambda x: x[1], reverse=True)[:10]),
-            "unique_domains": len(sender_stats["sender_domains"]),
-            "sender_domains": list(sender_stats["sender_domains"]),
-            "external_senders": sender_stats["external_senders"][:20]
-        }
-
-    def _analyze_recipients(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Analyze email recipients"""
-        recipient_stats = {
-            "to_recipients": [],
-            "cc_recipients": [],
-            "bcc_recipients": [],
-            "bulk_emails": []
-        }
+        if any(t.threat_type == "Email Spoofing" for t in threats):
+            recommendations.append("Implement SPF, DKIM, and DMARC email authentication")
+            recommendations.append("Configure email gateway to reject failed SPF/DKIM")
+            recommendations.append("Monitor for domain spoofing attempts")
         
-        for email_data in emails:
-            to_recipients = email_data.get("to", "")
-            cc_recipients = email_data.get("cc", "")
-            bcc_recipients = email_data.get("bcc", "")
-            
-            # Count recipients
-            to_count = len([r for r in to_recipients.split(",") if r.strip()]) if to_recipients else 0
-            cc_count = len([r for r in cc_recipients.split(",") if r.strip()]) if cc_recipients else 0
-            
-            total_recipients = to_count + cc_count
-            
-            if total_recipients > 10:  # Bulk email threshold
-                recipient_stats["bulk_emails"].append({
-                    "subject": email_data.get("subject", ""),
-                    "from": email_data.get("from", ""),
-                    "recipient_count": total_recipients
-                })
-            
-            if bcc_recipients:
-                recipient_stats["bcc_recipients"].append(email_data.get("subject", ""))
+        suspicious = email_data.get("suspicious_emails", [])
+        if any("shortened_urls" in e.get("suspicion_factors", []) for e in suspicious):
+            recommendations.append("Implement URL rewriting to reveal shortened URLs")
+            recommendations.append("Block or quarantine emails with suspicious URLs")
         
-        return {
-            "bulk_email_count": len(recipient_stats["bulk_emails"]),
-            "emails_with_bcc": len(recipient_stats["bcc_recipients"]),
-            "bulk_emails": recipient_stats["bulk_emails"][:10]
-        }
-
-    def _analyze_attachments(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Analyze email attachments"""
-        attachment_stats = {
-            "total_attachments": 0,
-            "file_types": {},
-            "attachment_sizes": [],
-            "large_attachments": []
-        }
+        if not recommendations:
+            recommendations.append("Maintain regular email security monitoring")
+            recommendations.append("Keep email security policies up to date")
         
-        for email_data in emails:
-            for attachment in email_data.get("attachments", []):
-                attachment_stats["total_attachments"] += 1
-                
-                filename = attachment.get("filename", "")
-                file_size = attachment.get("size", 0)
-                
-                # Track file types
-                if "." in filename:
-                    ext = filename.split(".")[-1].lower()
-                    attachment_stats["file_types"][ext] = attachment_stats["file_types"].get(ext, 0) + 1
-                
-                attachment_stats["attachment_sizes"].append(file_size)
-                
-                # Track large attachments
-                if file_size > 10 * 1024 * 1024:  # 10MB
-                    attachment_stats["large_attachments"].append({
-                        "filename": filename,
-                        "size": file_size,
-                        "email_subject": email_data.get("subject", "")
-                    })
-        
-        return {
-            "total_attachments": attachment_stats["total_attachments"],
-            "file_type_distribution": attachment_stats["file_types"],
-            "average_attachment_size": sum(attachment_stats["attachment_sizes"]) / len(attachment_stats["attachment_sizes"]) if attachment_stats["attachment_sizes"] else 0,
-            "large_attachments": attachment_stats["large_attachments"]
-        }
-
-    def _analyze_content(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Analyze email content patterns"""
-        content_stats = {
-            "pattern_matches": {},
-            "url_domains": set(),
-            "content_languages": [],
-            "message_lengths": []
-        }
-        
-        for email_data in emails:
-            all_content = email_data.get("body_text", "") + " " + email_data.get("body_html", "")
-            content_stats["message_lengths"].append(len(all_content))
-            
-            # Extract patterns
-            patterns = email_data.get("extracted_patterns", {})
-            for pattern_type, matches in patterns.items():
-                if pattern_type not in content_stats["pattern_matches"]:
-                    content_stats["pattern_matches"][pattern_type] = 0
-                content_stats["pattern_matches"][pattern_type] += len(matches)
-            
-            # Extract URL domains
-            for url_data in email_data.get("urls", []):
-                domain = url_data.get("domain", "")
-                if domain:
-                    content_stats["url_domains"].add(domain)
-        
-        return {
-            "average_message_length": sum(content_stats["message_lengths"]) / len(content_stats["message_lengths"]) if content_stats["message_lengths"] else 0,
-            "pattern_distribution": content_stats["pattern_matches"],
-            "unique_url_domains": len(content_stats["url_domains"]),
-            "url_domains": list(content_stats["url_domains"])[:50]
-        }
-
-    def _analyze_headers(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Analyze email headers"""
-        header_stats = {
-            "security_header_presence": {},
-            "routing_analysis": {},
-            "header_anomalies": []
-        }
-        
-        for email_data in emails:
-            security_headers = email_data.get("security_headers", {})
-            
-            # Track security header presence
-            for header in self.security_headers:
-                if header not in header_stats["security_header_presence"]:
-                    header_stats["security_header_presence"][header] = 0
-                if header in security_headers:
-                    header_stats["security_header_presence"][header] += 1
-            
-            # Analyze routing
-            routing_info = email_data.get("routing_info", [])
-            hop_count = len(routing_info)
-            
-            if hop_count not in header_stats["routing_analysis"]:
-                header_stats["routing_analysis"][hop_count] = 0
-            header_stats["routing_analysis"][hop_count] += 1
-            
-            # Check for anomalies
-            if hop_count > 10:
-                header_stats["header_anomalies"].append({
-                    "type": "Excessive routing hops",
-                    "subject": email_data.get("subject", ""),
-                    "hop_count": hop_count
-                })
-        
-        return header_stats
-
-    def _build_email_timeline(self, emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Build timeline of email events"""
-        timeline = []
-        
-        for email_data in emails:
-            parsed_date = email_data.get("parsed_date")
-            if parsed_date:
-                timeline.append({
-                    "timestamp": parsed_date.isoformat(),
-                    "subject": email_data.get("subject", ""),
-                    "from": email_data.get("from", ""),
-                    "to": email_data.get("to", ""),
-                    "has_attachments": len(email_data.get("attachments", [])) > 0,
-                    "attachment_count": len(email_data.get("attachments", [])),
-                    "url_count": len(email_data.get("urls", []))
-                })
-        
-        # Sort by timestamp
-        timeline.sort(key=lambda x: x["timestamp"])
-        
-        return timeline[:100]  # Limit timeline size
-
-    def _analyze_communication_patterns(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Analyze communication patterns"""
-        patterns = {
-            "hourly_distribution": {},
-            "daily_distribution": {},
-            "communication_frequency": {},
-            "response_patterns": []
-        }
-        
-        for email_data in emails:
-            parsed_date = email_data.get("parsed_date")
-            if parsed_date:
-                hour = parsed_date.hour
-                day = parsed_date.strftime("%A")
-                
-                patterns["hourly_distribution"][hour] = patterns["hourly_distribution"].get(hour, 0) + 1
-                patterns["daily_distribution"][day] = patterns["daily_distribution"].get(day, 0) + 1
-        
-        return patterns
-
-    def _analyze_metadata(self, emails: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Analyze email metadata"""
-        metadata = {
-            "message_id_patterns": [],
-            "client_analysis": {},
-            "encoding_analysis": {},
-            "format_analysis": {}
-        }
-        
-        for email_data in emails:
-            message_id = email_data.get("message_id", "")
-            if message_id and "@" in message_id:
-                domain = message_id.split("@")[-1].rstrip(">")
-                metadata["message_id_patterns"].append(domain)
-        
-        return metadata
-
-    def _extract_factual_iocs(self, email_data: Dict[str, Any], emails: List[Dict[str, Any]]) -> List[IOC]:
-        """Extract factual IOCs from email data"""
+        return recommendations[:5]
+    
+    def _extract_iocs(self, email_data: Dict[str, Any]) -> List[IOC]:
+        """Extract IOCs from email data"""
         iocs = []
+        seen_values = set()
         
         # Extract email addresses
-        sender_analysis = email_data.get("sender_analysis", {})
-        external_senders = sender_analysis.get("external_senders", [])
-        
-        for sender in external_senders[:50]:  # Limit to prevent overflow
-            if "@" in sender:
-                # Extract actual email from "Display Name <email@domain.com>" format
-                if "<" in sender and ">" in sender:
-                    actual_email = sender.split("<")[1].split(">")[0].strip()
-                else:
-                    actual_email = sender.strip()
-                
+        for sender, count in list(email_data.get("sender_analysis", {}).items())[:20]:
+            if '@' in sender and sender not in seen_values:
                 iocs.append(IOC(
                     type=IOCType.EMAIL_ADDRESS,
-                    value=actual_email,
+                    value=sender,
                     confidence=1.0,
-                    source="Email Headers",
-                    description="Email address found in sender field"
+                    source="Email Sender",
+                    description=f"Email sender (appeared {count} times)"
                 ))
+                seen_values.add(sender)
         
-        # Extract domains from URLs
-        content_analysis = email_data.get("content_analysis", {})
-        url_domains = content_analysis.get("url_domains", [])
-        
-        for domain in url_domains[:30]:  # Limit to prevent overflow
-            if domain:
-                iocs.append(IOC(
-                    type=IOCType.DOMAIN,
-                    value=domain,
-                    confidence=1.0,
-                    source="Email Content",
-                    description="Domain found in email URLs"
-                ))
-        
-        # Extract URLs from email content
-        for email_msg in emails:
-            for url_data in email_msg.get("urls", []):
-                url = url_data.get("url", "")
-                if url:
+        # Extract from suspicious emails
+        for email in email_data.get("suspicious_emails", [])[:20]:
+            # Extract URLs from body
+            body = email.get("body_preview", "")
+            url_pattern = re.compile(r'https?://[^\s<>"]+')
+            urls = url_pattern.findall(body)
+            
+            for url in urls[:5]:  # Limit URLs per email
+                if url not in seen_values:
                     iocs.append(IOC(
                         type=IOCType.URL,
                         value=url,
-                        confidence=1.0,
-                        source="Email Content",
-                        description="URL found in email content"
+                        confidence=0.8,
+                        source="Suspicious Email",
+                        description="URL found in suspicious email"
                     ))
-        
-        # Extract file hashes from attachments
-        for email_msg in emails:
-            for attachment in email_msg.get("attachments", []):
-                file_hash = attachment.get("file_hash")
-                if file_hash:
+                    seen_values.add(url)
+            
+            # Extract attachment hashes
+            for att in email.get("attachments", []):
+                if att.get("hash") and att["hash"] not in seen_values:
                     iocs.append(IOC(
-                        type=IOCType.FILE_HASH,
-                        value=file_hash,
+                        type=IOCType.HASH_SHA256,
+                        value=att["hash"],
                         confidence=1.0,
                         source="Email Attachment",
-                        description=f"Hash of attachment: {attachment.get('filename', 'unknown')}"
+                        description=f"Attachment: {att.get('filename', 'unknown')}"
                     ))
+                    seen_values.add(att["hash"])
         
-        return iocs
-
+        # Extract IPs from headers
+        for message in email_data.get("messages", [])[:50]:
+            headers = message.get("headers", {})
+            received = headers.get("received", "")
+            
+            ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
+            ips = ip_pattern.findall(received)
+            
+            for ip in ips[:2]:  # Limit IPs per message
+                if ip not in seen_values and not ip.startswith("192.168.") and not ip.startswith("10."):
+                    iocs.append(IOC(
+                        type=IOCType.IP_ADDRESS,
+                        value=ip,
+                        confidence=0.7,
+                        source="Email Headers",
+                        description="IP from email routing"
+                    ))
+                    seen_values.add(ip)
+        
+        return iocs[:50]  # Limit total IOCs
+    
     def _create_error_result(self, error_message: str) -> AnalysisResult:
         """Create error result for failed analysis"""
         return AnalysisResult(
             file_path="",
             parser_name=self.name,
-            analysis_type="Email Data Extraction",
+            analysis_type="Email Forensic Analysis",
             timestamp=datetime.now(),
-            summary=f"Data extraction failed: {error_message}",
+            summary=f"Analysis failed: {error_message}",
             details={"error": error_message},
             threats_detected=[],
             iocs_found=[],
             severity=Severity.LOW,
             risk_score=0.0,
-            recommendations=["Fix extraction error and retry analysis"]
+            recommendations=["Fix parsing error and retry analysis"]
         )
 
 def create_parser():
     """Factory function to create parser instance"""
-    return EmailForensicsParser()
+    return PSTParser()

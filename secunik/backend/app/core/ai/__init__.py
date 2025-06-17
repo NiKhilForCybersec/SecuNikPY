@@ -1,22 +1,19 @@
+# backend/app/core/ai/__init__.py
 """
-SecuNik - AI Integration Package
-Advanced AI-powered cybersecurity analysis
-
-Location: backend/app/core/ai/__init__.py
+AI integration modules for SecuNik
 """
 
-from .openai_client import create_ai_client, SecuNikAI
+from .openai_client import get_openai_client, OpenAIClient
+from .insights_generator import get_insights_generator, InsightsGenerator
+from .context_builder import get_context_builder, ContextBuilder
 from .prompt_templates import PromptTemplates
-from .context_builder import ContextBuilder
 
 __all__ = [
-    'create_ai_client',
-    'SecuNikAI',
-    'PromptTemplates', 
-    'ContextBuilder'
+    'get_openai_client',
+    'OpenAIClient',
+    'get_insights_generator',
+    'InsightsGenerator',
+    'get_context_builder',
+    'ContextBuilder',
+    'PromptTemplates'
 ]
-
-# Version information
-__version__ = "1.0.0"
-__author__ = "SecuNik Team"
-__description__ = "AI-powered cybersecurity analysis and threat intelligence"

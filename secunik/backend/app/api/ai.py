@@ -1,366 +1,518 @@
 """
-AI API Router
-Handles AI-powered analysis and chat functionality
+AI-powered analysis endpoints for SecuNik
 """
 
-import json
-import os
-from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-
-from fastapi import APIRouter, HTTPException
+import logging
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+import json
+import asyncio
+from pathlib import Path
 
-router = APIRouter(prefix="/api", tags=["ai"])
+from ..models.analysis import AnalysisStatus
+from ..core.ai.openai_client import get_openai_client
+from ..core.ai.insights_generator import get_insights_generator
+from ..core.ai.context_builder import get_context_builder
 
-# Get backend root directory
-current_dir = Path(__file__).parent.parent.parent  # Go up from app/api/ to backend/
-RESULTS_DIR = current_dir / "data" / "results"
+logger = logging.getLogger(__name__)
 
-# Check if OpenAI is available
-OPENAI_AVAILABLE = bool(os.getenv("OPENAI_API_KEY"))
+router = APIRouter(prefix="/api/ai", tags=["AI"])
 
-class ChatMessage(BaseModel):
-    """Chat message model"""
-    message: str
-    context: Optional[str] = None
-    file_id: Optional[str] = None
-
-class ChatResponse(BaseModel):
-    """Chat response model"""
-    response: str
-    confidence: float
-    sources: List[str]
-    suggestions: List[str]
-
+# Request/Response models
 class AIAnalysisRequest(BaseModel):
-    """AI analysis request model"""
     file_id: str
-    analysis_type: str = "comprehensive"
-    prompt: Optional[str] = None
+    analysis_type: Optional[str] = "comprehensive"
+    enable_insights: Optional[bool] = True
 
-@router.get("/ai/status")
+class AIChatRequest(BaseModel):
+    message: str
+    conversation_history: Optional[List[Dict[str, str]]] = None
+    context_file_id: Optional[str] = None
+
+class AIInsightsRequest(BaseModel):
+    file_ids: List[str]
+    insight_types: Optional[List[str]] = None
+
+class BulkAIAnalysisRequest(BaseModel):
+    file_ids: Optional[List[str]] = None
+    analysis_options: Optional[Dict[str, Any]] = None
+
+# Storage paths
+UPLOADS_DIR = Path("data/uploads")
+RESULTS_DIR = Path("data/results")
+
+@router.get("/status")
 async def get_ai_status():
-    """Get AI system status"""
+    """Get AI service status"""
+    ai_client = get_openai_client()
+    
+    health = await ai_client.health_check()
+    
     return {
-        "ai_available": OPENAI_AVAILABLE,
-        "openai_configured": OPENAI_AVAILABLE,
-        "status": "ready" if OPENAI_AVAILABLE else "configuration_required",
+        "status": health['status'],
+        "configured": ai_client.is_configured,
+        "model": ai_client.model if ai_client.is_configured else None,
+        "message": health.get('message', ''),
         "capabilities": [
             "threat_analysis",
-            "natural_language_queries", 
-            "file_correlation",
-            "recommendation_generation",
-            "chat_interface"
-        ] if OPENAI_AVAILABLE else [],
-        "version": "1.0.0"
-    }
-
-@router.post("/ai/chat")
-async def chat_with_ai(message: ChatMessage):
-    """Chat with AI about analysis results"""
-    try:
-        if not OPENAI_AVAILABLE:
-            return {
-                "response": "AI chat is not available. Please configure your OpenAI API key.",
-                "confidence": 0.0,
-                "sources": [],
-                "suggestions": ["Configure OpenAI API key", "Use manual analysis features"]
-            }
-        
-        # Basic chat responses (will be enhanced with real AI in next phase)
-        user_message = message.message.lower()
-        
-        # Simple keyword-based responses
-        if "threat" in user_message or "malware" in user_message:
-            response = "I can help you analyze threats in your uploaded files. Upload a file and I'll provide detailed threat analysis."
-            suggestions = ["Upload a suspicious file", "Check threat dashboard", "Review recent alerts"]
-            
-        elif "file" in user_message or "upload" in user_message:
-            response = "You can upload files for analysis using the upload endpoint. I support PDF, Office documents, archives, executables, and log files."
-            suggestions = ["Use /api/upload endpoint", "Check supported file types", "View file analysis results"]
-            
-        elif "help" in user_message or "how" in user_message:
-            response = "I'm SecuNik's AI assistant. I can help with threat analysis, file examination, and security recommendations. What would you like to analyze?"
-            suggestions = ["Upload a file for analysis", "Check threat dashboard", "Ask about specific threats"]
-            
-        elif message.file_id:
-            # If file ID is provided, get analysis info
-            result_file = RESULTS_DIR / f"{message.file_id}.json"
-            if result_file.exists():
-                with open(result_file, "r") as f:
-                    analysis = json.load(f)
-                
-                filename = analysis.get("details", {}).get("original_filename", "unknown")
-                severity = analysis.get("severity", "LOW")
-                risk_score = analysis.get("risk_score", 0.0)
-                threat_count = len(analysis.get("threats_detected", []))
-                
-                response = f"I've analyzed {filename}. Severity: {severity}, Risk Score: {risk_score:.2f}, Threats Found: {threat_count}. What would you like to know more about?"
-                suggestions = ["Show threat details", "Get recommendations", "Compare with similar files"]
-            else:
-                response = "I couldn't find analysis results for that file ID. Please check the ID or upload the file first."
-                suggestions = ["Verify file ID", "Upload file again", "Check file list"]
-                
-        else:
-            response = "I'm here to help with cybersecurity analysis. You can ask me about threats, upload files for analysis, or get security recommendations."
-            suggestions = ["Upload a file", "Check threats", "Get help"]
-        
-        return {
-            "response": response,
-            "confidence": 0.8,
-            "sources": ["SecuNik Knowledge Base"],
-            "suggestions": suggestions,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
-
-@router.post("/ai/analyze")
-async def ai_analyze_file(request: AIAnalysisRequest):
-    """AI-powered file analysis (enhanced version)"""
-    try:
-        if not OPENAI_AVAILABLE:
-            return {
-                "status": "unavailable",
-                "message": "AI analysis requires OpenAI API key configuration",
-                "basic_analysis_available": True
-            }
-        
-        # Check if file exists
-        result_file = RESULTS_DIR / f"{request.file_id}.json"
-        if not result_file.exists():
-            raise HTTPException(status_code=404, detail="File analysis not found")
-        
-        # Load existing analysis
-        with open(result_file, "r") as f:
-            analysis = json.load(f)
-        
-        # AI enhancement placeholder (will be implemented with real AI in next phase)
-        ai_enhanced_analysis = analysis.copy()
-        ai_enhanced_analysis.update({
-            "ai_analysis": {
-                "enhanced_by_ai": True,
-                "ai_confidence": 0.85,
-                "ai_insights": [
-                    "File appears to be legitimate based on metadata analysis",
-                    "No suspicious patterns detected in file structure", 
-                    "Recommend monitoring for unusual behavior if executed"
-                ],
-                "ai_risk_assessment": "Standard security protocols sufficient",
-                "ai_recommendations": [
-                    "Scan with updated antivirus before opening",
-                    "Open in sandboxed environment if suspicious",
-                    "Monitor network activity after execution"
-                ]
-            },
-            "enhanced_at": datetime.utcnow().isoformat()
-        })
-        
-        # Save enhanced analysis
-        with open(result_file, "w") as f:
-            json.dump(ai_enhanced_analysis, f, indent=2, default=str)
-        
-        return {
-            "status": "success",
-            "message": "AI analysis completed",
-            "file_id": request.file_id,
-            "ai_insights": ai_enhanced_analysis["ai_analysis"]["ai_insights"],
-            "ai_recommendations": ai_enhanced_analysis["ai_analysis"]["ai_recommendations"],
-            "confidence": ai_enhanced_analysis["ai_analysis"]["ai_confidence"]
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI analysis failed: {str(e)}")
-
-@router.get("/ai/insights/{file_id}")
-async def get_ai_insights(file_id: str):
-    """Get AI insights for a specific file"""
-    try:
-        result_file = RESULTS_DIR / f"{file_id}.json"
-        if not result_file.exists():
-            raise HTTPException(status_code=404, detail="File analysis not found")
-        
-        with open(result_file, "r") as f:
-            analysis = json.load(f)
-        
-        ai_analysis = analysis.get("ai_analysis", {})
-        
-        if not ai_analysis:
-            return {
-                "file_id": file_id,
-                "ai_insights_available": False,
-                "message": "No AI insights available. Run AI analysis first."
-            }
-        
-        return {
-            "file_id": file_id,
-            "ai_insights_available": True,
-            "insights": ai_analysis.get("ai_insights", []),
-            "recommendations": ai_analysis.get("ai_recommendations", []),
-            "confidence": ai_analysis.get("ai_confidence", 0.0),
-            "risk_assessment": ai_analysis.get("ai_risk_assessment", "Unknown")
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get AI insights: {str(e)}")
-
-@router.post("/ai/correlate")
-async def correlate_files():
-    """AI-powered cross-file correlation analysis"""
-    try:
-        if not OPENAI_AVAILABLE:
-            return {
-                "status": "unavailable",
-                "message": "AI correlation requires OpenAI API key configuration"
-            }
-        
-        # Basic correlation analysis (placeholder for full AI implementation)
-        correlations = []
-        analyses = []
-        
-        # Load all analyses
-        for result_file in RESULTS_DIR.glob("*.json"):
-            try:
-                with open(result_file, "r") as f:
-                    analysis = json.load(f)
-                    analyses.append({
-                        "file_id": result_file.stem,
-                        "filename": analysis.get("details", {}).get("original_filename", "unknown"),
-                        "threats": analysis.get("threats_detected", []),
-                        "risk_score": analysis.get("risk_score", 0.0),
-                        "analysis_type": analysis.get("analysis_type", "unknown")
-                    })
-            except Exception:
-                continue
-        
-        # Simple correlation based on similar threat patterns
-        for i, analysis1 in enumerate(analyses):
-            for j, analysis2 in enumerate(analyses[i+1:], i+1):
-                # Check for similar threat patterns
-                threats1 = [t.get("type", "") for t in analysis1["threats"]]
-                threats2 = [t.get("type", "") for t in analysis2["threats"]]
-                
-                common_threats = set(threats1).intersection(set(threats2))
-                
-                if common_threats:
-                    correlations.append({
-                        "file1": {
-                            "id": analysis1["file_id"],
-                            "filename": analysis1["filename"]
-                        },
-                        "file2": {
-                            "id": analysis2["file_id"], 
-                            "filename": analysis2["filename"]
-                        },
-                        "correlation_type": "similar_threats",
-                        "common_elements": list(common_threats),
-                        "confidence": 0.7
-                    })
-        
-        return {
-            "total_files": len(analyses),
-            "correlations_found": len(correlations),
-            "correlations": correlations[:10],  # Limit to 10 results
-            "ai_analysis": True
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Correlation analysis failed: {str(e)}")
-
-@router.get("/ai/capabilities")
-async def get_ai_capabilities():
-    """Get AI system capabilities"""
-    base_capabilities = [
-        "Basic threat detection",
-        "File type analysis", 
-        "Risk scoring",
-        "Security recommendations"
-    ]
-    
-    ai_capabilities = [
-        "Natural language queries",
-        "Advanced threat correlation",
-        "Behavioral analysis",
-        "Zero-day detection",
-        "Automated reporting",
-        "Intelligent recommendations"
-    ] if OPENAI_AVAILABLE else []
-    
-    return {
-        "openai_available": OPENAI_AVAILABLE,
-        "basic_capabilities": base_capabilities,
-        "ai_capabilities": ai_capabilities,
-        "supported_file_types": [
-            "PDF documents",
-            "Office documents (Word, Excel, PowerPoint)",
-            "Archive files (ZIP, RAR, 7z)",
-            "Executable files (PE files)",
-            "Log files",
-            "Network captures (PCAP)",
-            "Email files (PST, EML)",
-            "Registry files"
-        ],
-        "analysis_types": [
-            "Static analysis",
-            "Metadata extraction", 
-            "Threat detection",
-            "IoC extraction",
-            "Risk assessment"
+            "ioc_extraction",
+            "risk_assessment",
+            "timeline_analysis",
+            "chat_interface",
+            "report_generation"
         ]
     }
 
-@router.post("/ai/bulk-analyze")
-async def bulk_ai_analysis():
-    """Perform AI analysis on all uploaded files"""
+@router.post("/analyze/{file_id}")
+async def ai_analyze_file(file_id: str, request: AIAnalysisRequest):
+    """Perform AI-enhanced analysis on a file"""
     try:
-        if not OPENAI_AVAILABLE:
+        # Get AI client
+        ai_client = get_openai_client()
+        
+        if not ai_client.is_configured:
             return {
                 "status": "unavailable",
-                "message": "Bulk AI analysis requires OpenAI API key configuration"
+                "error": "AI service not configured"
             }
         
-        results = []
-        processed = 0
+        # Load existing analysis result
+        result_file = RESULTS_DIR / f"{file_id}.json"
+        if not result_file.exists():
+            raise HTTPException(status_code=404, detail="Analysis result not found")
         
-        for result_file in RESULTS_DIR.glob("*.json"):
-            try:
-                file_id = result_file.stem
-                
-                # Simulate AI analysis for each file
+        with open(result_file, "r") as f:
+            analysis_result = json.load(f)
+        
+        # Build context
+        context_builder = get_context_builder()
+        evidence_context = context_builder.build_comprehensive_context([analysis_result])
+        
+        # Perform AI analysis
+        ai_result = await ai_client.analyze_security_evidence(
+            evidence_context,
+            request.analysis_type
+        )
+        
+        if "error" in ai_result:
+            return {
+                "status": "failed",
+                "error": ai_result['error']
+            }
+        
+        # Generate insights if requested
+        insights = None
+        if request.enable_insights:
+            insights_generator = get_insights_generator()
+            insights = await insights_generator.generate_file_insights(analysis_result)
+        
+        # Update analysis result with AI enhancement
+        analysis_result['ai_analysis'] = ai_result
+        analysis_result['ai_insights'] = insights
+        analysis_result['ai_enhanced'] = True
+        analysis_result['ai_timestamp'] = datetime.now().isoformat()
+        
+        # Save updated result
+        with open(result_file, "w") as f:
+            json.dump(analysis_result, f, indent=2, default=str)
+        
+        return {
+            "status": "completed",
+            "file_id": file_id,
+            "ai_analysis": ai_result,
+            "insights": insights,
+            "confidence": ai_result.get('confidence', 0.8)
+        }
+        
+    except Exception as e:
+        logger.error(f"AI analysis failed for {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chat")
+async def ai_chat(request: AIChatRequest):
+    """Chat with AI about security analysis"""
+    try:
+        ai_client = get_openai_client()
+        
+        if not ai_client.is_configured:
+            return {
+                "status": "unavailable",
+                "error": "AI service not configured",
+                "response": "AI features are not available. Please configure OpenAI API key."
+            }
+        
+        # Load context if file specified
+        evidence_context = None
+        if request.context_file_id:
+            result_file = RESULTS_DIR / f"{request.context_file_id}.json"
+            if result_file.exists():
                 with open(result_file, "r") as f:
-                    analysis = json.load(f)
+                    analysis_result = json.load(f)
                 
-                # Add AI enhancement
-                filename = analysis.get("details", {}).get("original_filename", "unknown")
-                risk_score = analysis.get("risk_score", 0.0)
+                context_builder = get_context_builder()
+                evidence_context = {
+                    "file_id": request.context_file_id,
+                    "summary": analysis_result.get("summary", ""),
+                    "threats": analysis_result.get("threats_detected", []),
+                    "iocs": analysis_result.get("iocs_found", []),
+                    "risk_score": analysis_result.get("risk_score", 0)
+                }
+        
+        # Get AI response
+        response = await ai_client.chat(
+            request.message,
+            request.conversation_history,
+            evidence_context
+        )
+        
+        return {
+            "status": "success",
+            "response": response.get("response", ""),
+            "role": response.get("role", "assistant"),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"AI chat error: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "response": "I encountered an error processing your request."
+        }
+
+@router.post("/insights")
+async def generate_insights(request: AIInsightsRequest):
+    """Generate AI insights for multiple files"""
+    try:
+        insights_generator = get_insights_generator()
+        
+        # Load analysis results
+        analysis_results = []
+        for file_id in request.file_ids:
+            result_file = RESULTS_DIR / f"{file_id}.json"
+            if result_file.exists():
+                with open(result_file, "r") as f:
+                    analysis_results.append(json.load(f))
+        
+        if not analysis_results:
+            return {
+                "status": "failed",
+                "error": "No valid analysis results found"
+            }
+        
+        # Generate insights
+        insights = await insights_generator.generate_comprehensive_insights(
+            analysis_results,
+            request.insight_types
+        )
+        
+        return {
+            "status": "completed",
+            "file_count": len(analysis_results),
+            "insights": insights,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Insights generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/extract-iocs")
+async def extract_iocs_with_ai(text: str):
+    """Extract IOCs from text using AI"""
+    try:
+        ai_client = get_openai_client()
+        
+        if not ai_client.is_configured:
+            return {
+                "status": "unavailable",
+                "error": "AI service not configured"
+            }
+        
+        # Extract IOCs
+        iocs = await ai_client.extract_iocs_with_ai(text)
+        
+        return {
+            "status": "completed",
+            "iocs": iocs,
+            "total_found": len(iocs)
+        }
+        
+    except Exception as e:
+        logger.error(f"IOC extraction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/correlate-events")
+async def correlate_events(events: List[Dict[str, Any]]):
+    """Correlate security events using AI"""
+    try:
+        ai_client = get_openai_client()
+        
+        if not ai_client.is_configured:
+            return {
+                "status": "unavailable",
+                "error": "AI service not configured"
+            }
+        
+        # Correlate events
+        correlation_result = await ai_client.correlate_events(events)
+        
+        return {
+            "status": "completed",
+            "correlation": correlation_result
+        }
+        
+    except Exception as e:
+        logger.error(f"Event correlation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/generate-report/{case_id}")
+async def generate_ai_report(case_id: str):
+    """Generate comprehensive AI report for a case"""
+    try:
+        ai_client = get_openai_client()
+        insights_generator = get_insights_generator()
+        
+        if not ai_client.is_configured:
+            return {
+                "status": "unavailable",
+                "error": "AI service not configured"
+            }
+        
+        # Load all analysis results for the case
+        analysis_results = []
+        case_dir = Path(f"data/cases/{case_id}")
+        
+        if not case_dir.exists():
+            raise HTTPException(status_code=404, detail="Case not found")
+        
+        # Load case metadata
+        case_file = case_dir / "case.json"
+        case_info = {}
+        if case_file.exists():
+            with open(case_file, "r") as f:
+                case_info = json.load(f)
+        
+        # Load analysis results
+        for result_file in RESULTS_DIR.glob("*.json"):
+            with open(result_file, "r") as f:
+                result = json.load(f)
+                # Check if file belongs to case
+                if result.get("case_id") == case_id:
+                    analysis_results.append(result)
+        
+        if not analysis_results:
+            return {
+                "status": "failed",
+                "error": "No analysis results found for case"
+            }
+        
+        # Generate comprehensive report
+        report = await ai_client.generate_threat_report(
+            analysis_results,
+            case_info
+        )
+        
+        if "error" in report:
+            return {
+                "status": "failed",
+                "error": report['error']
+            }
+        
+        # Save report
+        report_file = case_dir / f"ai_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(report_file, "w") as f:
+            json.dump(report, f, indent=2)
+        
+        return {
+            "status": "completed",
+            "case_id": case_id,
+            "report": report['report'],
+            "report_file": str(report_file),
+            "generated_at": report['generated_at']
+        }
+        
+    except Exception as e:
+        logger.error(f"Report generation failed for case {case_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/bulk-analysis")
+async def bulk_ai_analysis(request: BulkAIAnalysisRequest, background_tasks: BackgroundTasks):
+    """Perform AI analysis on multiple files"""
+    try:
+        # Get AI client
+        ai_client = get_openai_client()
+        insights_generator = get_insights_generator()
+        
+        if not ai_client.is_configured:
+            return {
+                "status": "unavailable",
+                "error": "AI service not configured"
+            }
+        
+        # Determine which files to analyze
+        file_ids = request.file_ids
+        if not file_ids:
+            # Analyze all available results
+            file_ids = [f.stem for f in RESULTS_DIR.glob("*.json")]
+        
+        if not file_ids:
+            return {
+                "status": "failed",
+                "error": "No files to analyze"
+            }
+        
+        # Start background task
+        task_id = f"bulk_ai_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        background_tasks.add_task(
+            perform_bulk_ai_analysis,
+            file_ids,
+            request.analysis_options or {},
+            task_id
+        )
+        
+        return {
+            "status": "started",
+            "task_id": task_id,
+            "file_count": len(file_ids),
+            "message": "Bulk AI analysis started in background"
+        }
+        
+    except Exception as e:
+        logger.error(f"Bulk analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def perform_bulk_ai_analysis(file_ids: List[str], options: Dict[str, Any], task_id: str):
+    """Background task to perform bulk AI analysis"""
+    try:
+        ai_client = get_openai_client()
+        insights_generator = get_insights_generator()
+        
+        results = []
+        
+        for file_id in file_ids:
+            try:
+                # Load analysis result
+                result_file = RESULTS_DIR / f"{file_id}.json"
+                if not result_file.exists():
+                    continue
                 
+                with open(result_file, "r") as f:
+                    analysis_result = json.load(f)
+                
+                # Build context
+                context_builder = get_context_builder()
+                evidence_context = context_builder.build_comprehensive_context([analysis_result])
+                
+                # Perform AI analysis
+                ai_result = await ai_client.analyze_security_evidence(
+                    evidence_context,
+                    options.get('analysis_type', 'comprehensive')
+                )
+                
+                if "error" not in ai_result:
+                    # Update result
+                    analysis_result['ai_analysis'] = ai_result
+                    analysis_result['ai_enhanced'] = True
+                    analysis_result['ai_timestamp'] = datetime.now().isoformat()
+                    
+                    # Save updated result
+                    with open(result_file, "w") as f:
+                        json.dump(analysis_result, f, indent=2, default=str)
+                    
+                    results.append({
+                        "file_id": file_id,
+                        "status": "completed"
+                    })
+                else:
+                    results.append({
+                        "file_id": file_id,
+                        "status": "failed",
+                        "error": ai_result['error']
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error processing {file_id}: {str(e)}")
                 results.append({
                     "file_id": file_id,
-                    "filename": filename,
-                    "ai_enhanced": True,
-                    "original_risk": risk_score,
-                    "ai_risk": min(risk_score + 0.1, 1.0),  # Slight AI adjustment
-                    "status": "completed"
-                })
-                
-                processed += 1
-                
-            except Exception as e:
-                results.append({
-                    "file_id": result_file.stem,
                     "status": "failed",
                     "error": str(e)
                 })
         
+        # Generate comprehensive insights
+        successful_results = []
+        for file_id in file_ids:
+            result_file = RESULTS_DIR / f"{file_id}.json"
+            if result_file.exists():
+                with open(result_file, "r") as f:
+                    successful_results.append(json.load(f))
+        
+        if successful_results:
+            insights = await insights_generator.generate_comprehensive_insights(
+                successful_results,
+                options.get('insight_types')
+            )
+            
+            # Save insights
+            insights_file = RESULTS_DIR / f"{task_id}_insights.json"
+            with open(insights_file, "w") as f:
+                json.dump(insights, f, indent=2)
+        
+        # Save task results
+        task_result = {
+            "task_id": task_id,
+            "status": "completed",
+            "completed_at": datetime.now().isoformat(),
+            "total_files": len(file_ids),
+            "successful": len([r for r in results if r['status'] == 'completed']),
+            "failed": len([r for r in results if r['status'] == 'failed']),
+            "results": results,
+            "insights_file": str(insights_file) if successful_results else None
+        }
+        
+        task_file = RESULTS_DIR / f"{task_id}.json"
+        with open(task_file, "w") as f:
+            json.dump(task_result, f, indent=2)
+            
+    except Exception as e:
+        logger.error(f"Bulk AI analysis task failed: {str(e)}")
+
+@router.get("/task/{task_id}")
+async def get_task_status(task_id: str):
+    """Get status of a background AI task"""
+    task_file = RESULTS_DIR / f"{task_id}.json"
+    
+    if not task_file.exists():
+        return {
+            "status": "running",
+            "task_id": task_id,
+            "message": "Task is still processing"
+        }
+    
+    with open(task_file, "r") as f:
+        task_result = json.load(f)
+    
+    return task_result
+
+@router.post("/quick-insights")
+async def get_quick_insights(data: Dict[str, Any], insight_type: str):
+    """Get quick AI insights for specific data"""
+    try:
+        insights_generator = get_insights_generator()
+        
+        insights = await insights_generator.generate_quick_insights(
+            data,
+            insight_type
+        )
+        
         return {
             "status": "completed",
-            "total_files": len(results),
-            "successfully_processed": processed,
-            "results": results
+            "insight_type": insight_type,
+            "insights": insights
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Bulk analysis failed: {str(e)}")
+        logger.error(f"Quick insights failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

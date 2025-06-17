@@ -6,6 +6,7 @@ Location: backend/app/core/ai/prompt_templates.py
 """
 
 from typing import Dict, Any, List
+from collections import defaultdict
 
 class PromptTemplates:
     """Enhanced AI prompts for complete cybersecurity analysis"""
@@ -76,54 +77,26 @@ Determine the overall security severity level:
 
 Justify your severity assessment with specific evidence.
 
-## 3. RISK SCORING (0-100 scale)
-Calculate a comprehensive risk score considering:
-- Number and severity of threats (0-40 points)
-- Potential business impact (0-20 points)
-- Ease of exploitation (0-20 points)
-- Current security posture (0-20 points)
+## 3. RISK ANALYSIS
+Calculate risk score (0.0-1.0) based on:
+- Threat severity
+- Number and type of indicators
+- Potential impact
+- Attack sophistication
 
-Provide the numerical score and explain your calculation.
+## 4. RECOMMENDATIONS
+Provide actionable recommendations categorized by urgency:
+- **IMMEDIATE**: Actions needed within 0-24 hours
+- **SHORT-TERM**: Actions needed within 1-7 days
+- **LONG-TERM**: Strategic improvements for 1-3 months
 
-## 4. DETAILED TECHNICAL ANALYSIS
-Provide deep technical insights:
-- **File/Network/System Analysis**: Technical details of what was found
-- **Behavioral Analysis**: How the threats would manifest
-- **Timeline Analysis**: Sequence of events if applicable
-- **Attribution Indicators**: Potential threat actor signatures
-- **Related Campaigns**: Known similar attacks or malware families
+## 5. ADDITIONAL ANALYSIS
+Include any of these if relevant:
+- **Attribution**: Possible threat actors or campaigns
+- **Attack Timeline**: Sequence of malicious activities
+- **Affected Systems**: Scope of potential compromise
+- **Data at Risk**: Types of sensitive data potentially exposed
 
-## 5. IMMEDIATE ACTION ITEMS (Prioritized)
-Generate specific, actionable recommendations:
-- **URGENT** (Do immediately): Critical containment actions
-- **HIGH PRIORITY** (Within 24 hours): Important security measures
-- **MEDIUM PRIORITY** (Within week): Strengthening measures
-- **ONGOING** (Continuous): Monitoring and prevention
-
-## 6. INVESTIGATION RECOMMENDATIONS
-Suggest next steps for deeper investigation:
-- Additional evidence to collect
-- Systems to examine
-- Tools and techniques to use
-- External resources to consult
-
-## 7. LONG-TERM SECURITY IMPROVEMENTS
-Recommend systemic improvements:
-- Security architecture changes
-- Policy updates
-- Training recommendations
-- Technology implementations
-
-## 8. EXECUTIVE SUMMARY
-Provide a non-technical summary for leadership:
-- Key findings in business terms
-- Potential business impact
-- Recommended investment priorities
-- Risk acceptance considerations
-
-RESPONSE FORMAT:
-Structure your response with clear headings using ## for sections.
-Use bullet points for lists and **bold** for emphasis.
 Provide specific evidence references to support your analysis.
 Be comprehensive but prioritize actionable insights.
 
@@ -185,174 +158,89 @@ For each identified threat:
 1. **Threat Confidence**: High (90-100%), Medium (60-89%), Low (30-59%)
 2. **Impact Severity**: Critical/High/Medium/Low
 3. **Exploitation Likelihood**: Immediate/Likely/Possible/Unlikely
-4. **Business Risk**: Financial/Operational/Reputational/Compliance
+4. **Priority Score**: Combined assessment for response prioritization
 
-## ATTACK CHAIN RECONSTRUCTION
-If multiple threats detected:
-- Map the complete attack sequence
-- Identify initial access vectors
-- Track lateral movement progression
-- Determine final objectives (data theft, persistence, disruption)
+## THREAT CONTEXT
+Position identified threats within:
+- Current threat landscape trends
+- Industry-specific threat patterns
+- Geographic threat intelligence
+- Recent campaign similarities
 
-## THREAT INTELLIGENCE CORRELATION
-Compare findings with known threat intelligence:
-- Similar attack patterns or TTPs
-- Known malware families or tools
-- Threat actor attribution indicators
-- Geographic or sector targeting patterns
-
-## IMMEDIATE THREAT RESPONSE
-Provide specific containment actions:
-- Systems to isolate or shut down
-- Network segments to block
-- Accounts to disable or monitor
-- Evidence preservation requirements
-
-Prioritize response actions by urgency and impact.
-"""
-        return prompt
-
-    def get_risk_scoring_prompt(self, context: Dict[str, Any]) -> str:
-        """AI-powered risk scoring prompt"""
-        
-        prompt = f"""{self.base_context}
-
-INTELLIGENT RISK SCORING REQUEST:
-Calculate a comprehensive cybersecurity risk score (0-100) based on extracted evidence.
-
-EVIDENCE DATA:
-{self._format_extracted_data(context.get('details', {}))}
-
-IDENTIFIED THREATS:
-{self._format_threat_context(context.get('threats', []))}
-
-RISK SCORING METHODOLOGY:
-
-## BASE RISK FACTORS (60 points maximum)
-
-**Threat Severity (0-25 points):**
-- Critical threats: 25 points
-- High threats: 15-20 points each
-- Medium threats: 8-12 points each  
-- Low threats: 2-5 points each
-
-**Threat Confidence (0-15 points):**
-- High confidence detections: Full points
-- Medium confidence: 70% of points
-- Low confidence: 40% of points
-
-**Number of Threats (0-20 points):**
-- Single threat: 5-10 points
-- Multiple related threats: 10-15 points
-- Multiple unrelated threats: 15-20 points
-
-## IMPACT MULTIPLIERS (40 points maximum)
-
-**System Criticality (0-15 points):**
-- Critical infrastructure: 15 points
-- Business-critical systems: 10-12 points
-- Standard systems: 5-8 points
-- Development/test systems: 2-5 points
-
-**Data Sensitivity (0-15 points):**
-- Personal/financial data: 15 points
-- Proprietary information: 10-12 points
-- Internal business data: 5-8 points
-- Public information: 2-5 points
-
-**Business Impact Potential (0-10 points):**
-- Service disruption potential
-- Financial loss potential
-- Regulatory compliance impact
-- Reputational damage risk
-
-## RISK CALCULATION
-1. Calculate base threat score (0-60)
-2. Add impact assessment (0-40)  
-3. Apply any aggravating factors
-4. Ensure final score is 0-100
-
-## RISK LEVEL CLASSIFICATION
-- 0-25: **LOW RISK** - Monitoring recommended
-- 26-50: **MEDIUM RISK** - Security review needed
-- 51-75: **HIGH RISK** - Immediate action required
-- 76-100: **CRITICAL RISK** - Emergency response
-
-Provide your detailed scoring breakdown and final risk assessment.
+Provide evidence-based threat assessment with clear prioritization for response.
 """
         return prompt
 
     def get_ioc_analysis_prompt(self, context: Dict[str, Any]) -> str:
-        """Enhanced IOC analysis and threat correlation prompt"""
+        """Enhanced IOC-focused analysis prompt"""
         
         prompt = f"""{self.base_context}
 
-IOC ANALYSIS & THREAT CORRELATION REQUEST:
-Analyze extracted indicators and correlate with threat intelligence.
+IOC ANALYSIS AND THREAT INTELLIGENCE REQUEST:
+Analyze the extracted Indicators of Compromise (IOCs) for threat intelligence.
 
-EXTRACTED INDICATORS:
-{self._format_detailed_iocs(context.get('iocs', []))}
+EXTRACTED IOCS:
+Total IOCs: {context.get('total_iocs', 0)}
+IOC Types: {', '.join(context.get('ioc_types', {}).keys())}
 
-SUPPORTING EVIDENCE:
-{self._format_extracted_data(context.get('evidence_data', {}))}
+DETAILED IOC LIST:
+{self._format_detailed_iocs(context.get('high_confidence_iocs', []))}
+
+IOC CATEGORIES:
+{self._format_ioc_categories(context.get('unique_indicators', {}))}
 
 IOC ANALYSIS REQUIREMENTS:
 
-## IOC CLASSIFICATION & VALIDATION
-For each indicator, determine:
-- **IOC Type**: IP, Domain, URL, File Hash, Registry Key, etc.
-- **Threat Relevance**: Direct threat, Supporting evidence, False positive likely
-- **Confidence Level**: How certain are you this is malicious/suspicious?
-- **Context**: How this IOC fits into the broader evidence
+## THREAT INTELLIGENCE ANALYSIS
+For significant IOCs, determine:
+- Known malicious associations
+- Historical usage in campaigns
+- Infrastructure relationships
+- Geographic origins (when applicable)
 
-## THREAT INTELLIGENCE CORRELATION
-Analyze IOCs for:
-- **Known Malicious Indicators**: Match against known bad IOCs
-- **Suspicious Patterns**: Unusual but not definitively malicious
-- **Infrastructure Analysis**: Hosting patterns, registration data
-- **Campaign Correlation**: Similar IOCs from known campaigns
+## ATTACK PATTERN IDENTIFICATION
+Based on IOC combinations:
+- Attack techniques indicated
+- Tool signatures present
+- Campaign similarities
+- Threat actor TTPs
 
-## IOC PRIORITIZATION
-Rank IOCs by:
-1. **High Priority**: Definitive threat indicators requiring immediate action
-2. **Medium Priority**: Suspicious indicators needing investigation
-3. **Low Priority**: Contextual indicators for monitoring
+## INFRASTRUCTURE ANALYSIS
+For network-based IOCs:
+- Hosting provider patterns
+- Domain registration analysis
+- Certificate patterns
+- Network relationships
 
-## NETWORK IOC ANALYSIS
-For IP addresses, domains, URLs:
-- Geolocation and hosting analysis
-- Domain registration patterns
-- URL structure analysis
-- Network infrastructure assessment
+## MALWARE ASSOCIATION
+For file-based IOCs:
+- Known malware family matches
+- Behavioral pattern indicators
+- Code similarity markers
+- Distribution methods
 
-## FILE IOC ANALYSIS  
-For file hashes and paths:
-- Known malware family associations
-- File behavior analysis
-- Distribution patterns
-- Variant analysis
+## TIMELINE CORRELATION
+Analyze temporal aspects:
+- IOC appearance sequence
+- Activity patterns
+- Campaign timing indicators
+- Attack progression markers
 
-## BEHAVIORAL IOC ANALYSIS
-For registry keys, user agents, etc.:
-- Attack technique mapping
-- Persistence mechanism analysis
-- Evasion technique identification
+## THREAT HUNTING GUIDANCE
+Based on IOCs found:
+- Additional IOCs to search for
+- Log sources to examine
+- Network patterns to monitor
+- System artifacts to check
 
-## IOC-BASED DETECTION RULES
-Generate detection rules for security tools:
-- SIEM queries
-- Network monitoring rules
-- Endpoint detection logic
-- Threat hunting queries
+## DEFENSIVE RECOMMENDATIONS
+Provide specific guidance:
+- Blocking recommendations (IPs, domains, hashes)
+- Detection rule suggestions
+- Monitoring priorities
+- Incident response actions
 
-## THREAT HUNTING RECOMMENDATIONS
-Suggest proactive hunting for:
-- Related IOCs not yet discovered
-- Similar attack patterns
-- Compromised systems showing these indicators
-- Historical evidence of these threats
-
-Provide actionable threat intelligence based on IOC analysis.
+Focus on actionable intelligence that enables proactive defense.
 """
         return prompt
 
@@ -426,481 +314,326 @@ Based on timeline analysis:
 Provide a comprehensive attack timeline with security implications.
 """
         return prompt
-
-    def _format_extracted_data(self, details: Dict[str, Any]) -> str:
-        """Format extracted data for AI analysis"""
-        if not details:
-            return "No extracted data available"
-        
-        formatted = []
-        
-        # Prioritize important data categories
-        priority_keys = [
-            "total_events", "total_packets", "total_emails", "autostart_entries",
-            "installed_software", "pe_header", "sections", "imports", "exports",
-            "authentication_events", "network_interfaces", "usb_devices",
-            "file_info", "strings_analysis", "entropy_analysis"
-        ]
-        
-        # Format priority data first
-        for key in priority_keys:
-            if key in details:
-                formatted.append(f"**{key.replace('_', ' ').title()}**: {self._format_data_value(details[key])}")
-        
-        # Add other relevant data
-        remaining_keys = [k for k in details.keys() if k not in priority_keys]
-        for key in remaining_keys[:10]:  # Limit to prevent prompt overflow
-            formatted.append(f"**{key.replace('_', ' ').title()}**: {self._format_data_value(details[key])}")
-        
-        return "\n".join(formatted)
-
-    def _format_data_value(self, value: Any) -> str:
-        """Format individual data values for readability"""
-        if isinstance(value, dict):
-            if len(value) > 5:
-                sample_items = list(value.items())[:3]
-                return f"Dictionary with {len(value)} items. Sample: {dict(sample_items)}"
-            return str(value)
-        elif isinstance(value, list):
-            if len(value) > 10:
-                return f"List with {len(value)} items. Sample: {value[:3]}"
-            return str(value)
-        elif isinstance(value, str) and len(value) > 200:
-            return value[:200] + "..."
-        else:
-            return str(value)
-
-    def _format_factual_iocs(self, iocs: List[Dict[str, Any]]) -> str:
-        """Format factual IOCs for AI analysis"""
-        if not iocs:
-            return "No indicators extracted"
-        
-        formatted = []
-        ioc_types = {}
-        
-        # Group IOCs by type
-        for ioc in iocs:
-            ioc_type = ioc.get('type', 'Unknown')
-            if ioc_type not in ioc_types:
-                ioc_types[ioc_type] = []
-            ioc_types[ioc_type].append(ioc)
-        
-        # Format by type
-        for ioc_type, ioc_list in ioc_types.items():
-            formatted.append(f"**{ioc_type}** ({len(ioc_list)} items):")
-            for ioc in ioc_list[:10]:  # Limit per type
-                value = ioc.get('value', 'Unknown')
-                source = ioc.get('source', 'Unknown')
-                formatted.append(f"  - {value} (from {source})")
-            
-            if len(ioc_list) > 10:
-                formatted.append(f"  ... and {len(ioc_list) - 10} more")
-        
-        return "\n".join(formatted)
-
-    def _format_threat_context(self, threats: List[Dict[str, Any]]) -> str:
-        """Format threat context for scoring"""
-        if not threats:
-            return "No threats identified yet - AI should identify threats from evidence"
-        
-        formatted = []
-        for i, threat in enumerate(threats, 1):
-            formatted.append(f"{i}. **{threat.get('type', 'Unknown Threat')}**")
-            formatted.append(f"   - Severity: {threat.get('severity', 'Unknown')}")
-            formatted.append(f"   - Description: {threat.get('description', 'No description')}")
-            if threat.get('indicators'):
-                formatted.append(f"   - Indicators: {', '.join(threat['indicators'][:3])}")
-        
-        return "\n".join(formatted)
-
-    def _format_detailed_iocs(self, iocs: List[Dict[str, Any]]) -> str:
-        """Format detailed IOCs for threat intelligence analysis"""
-        if not iocs:
-            return "No IOCs available for analysis"
-        
-        formatted = []
-        for i, ioc in enumerate(iocs[:25], 1):  # Limit to prevent prompt overflow
-            formatted.append(f"{i}. **{ioc.get('type', 'Unknown')}**: {ioc.get('value', 'Unknown')}")
-            formatted.append(f"   - Confidence: {ioc.get('confidence', 'Unknown')}")
-            formatted.append(f"   - Source: {ioc.get('source', 'Unknown')}")
-            formatted.append(f"   - Context: {ioc.get('description', 'No description')}")
-            formatted.append("")
-        
-        return "\n".join(formatted)
-
-    def _format_timeline_context(self, timeline: List[Dict[str, Any]]) -> str:
-        """Format timeline data for analysis"""
-        if not timeline:
-            return "No timeline data available"
-        
-        formatted = []
-        for i, event in enumerate(timeline[:50], 1):  # Limit to prevent overflow
-            timestamp = event.get('timestamp', 'Unknown time')
-            description = event.get('description', 'No description')
-            source = event.get('source', 'Unknown source')
-            formatted.append(f"{i}. **{timestamp}**: {description} ({source})")
-        
-        if len(timeline) > 50:
-            formatted.append(f"... and {len(timeline) - 50} more events")
-        
-        return "\n".join(formatted)
-
-    # Keep existing methods for backward compatibility
-    def get_quick_summary_prompt(self, context: Dict[str, Any]) -> str:
-        """Generate quick AI-powered summary prompt"""
+    
+    def get_report_generation_prompt(self, context: Dict[str, Any]) -> str:
+        """Report generation prompt"""
         
         prompt = f"""{self.base_context}
 
-QUICK CYBERSECURITY ASSESSMENT REQUEST:
-Provide rapid threat assessment and recommendations.
+SECURITY INCIDENT REPORT GENERATION:
+Create a professional security incident report based on the analysis results.
 
-EVIDENCE: {context.get('file_path', 'Unknown')}
-TYPE: {context.get('analysis_type', 'Unknown')}
-SUMMARY: {context.get('summary', 'No summary available')}
+CASE INFORMATION:
+{self._format_case_info(context.get('case_info', {}))}
 
-KEY DATA EXTRACTED:
-{self._format_extracted_data(context.get('details', {}))}
+ANALYSIS SUMMARY:
+- Total Files Analyzed: {len(context.get('analysis_results', []))}
+- Analysis Period: {context.get('timestamp', 'Unknown')}
 
-QUICK ANALYSIS REQUIREMENTS:
-
-## THREAT SUMMARY (2-3 sentences)
-Identify the most critical security concerns from the evidence.
-
-## RISK LEVEL
-Assign overall risk: CRITICAL / HIGH / MEDIUM / LOW
-Justify with specific evidence.
-
-## IMMEDIATE ACTIONS (Top 3)
-Most urgent security actions needed:
-1. [Critical action]
-2. [Important action]  
-3. [Recommended action]
-
-## KEY INDICATORS
-Most important IOCs or evidence found.
-
-## INVESTIGATION PRIORITY
-What should be investigated next?
-
-Keep response focused and actionable for immediate decision-making.
-"""
-        return prompt
-
-    def get_correlation_analysis_prompt(self, context: Dict[str, Any]) -> str:
-        """Multi-file correlation analysis prompt"""
-        
-        prompt = f"""{self.base_context}
-
-MULTI-SOURCE CORRELATION ANALYSIS REQUEST:
-Analyze relationships and attack patterns across multiple evidence sources.
-
-EVIDENCE SOURCES: {context.get('file_count', 0)} files analyzed
-{self._format_correlation_sources(context.get('files', []))}
-
-COMBINED EXTRACTED DATA:
-{self._format_aggregate_data(context.get('aggregate_data', {}))}
-
-CORRELATION ANALYSIS REQUIREMENTS:
-
-## CROSS-SOURCE THREAT CORRELATION
-Identify threats that span multiple evidence sources:
-- Shared IOCs and their significance
-- Related attack techniques across sources
-- Timeline correlation between sources
-- Common adversary TTPs
-
-## ATTACK CHAIN RECONSTRUCTION
-Build complete attack narrative:
-- Initial access vector identification
-- Lateral movement progression
-- Persistence mechanism deployment
-- Data access and exfiltration
-- Cleanup and evasion activities
-
-## THREAT ACTOR PROFILING
-Analyze adversary characteristics:
-- Skill level and sophistication
-- Tools and techniques used
-- Operational patterns and timing
-- Possible attribution indicators
-
-## IMPACT ASSESSMENT
-Evaluate combined impact:
-- Systems and data affected
-- Business operations disrupted
-- Security control failures
-- Containment requirements
-
-## COMPREHENSIVE RISK SCORING
-Calculate aggregate risk considering:
-- Multiple attack vectors
-- Compounded vulnerabilities
-- Systemic security failures
-- Business impact magnitude
-
-## STRATEGIC RECOMMENDATIONS
-Provide enterprise-level guidance:
-- Immediate response priorities
-- Security architecture improvements
-- Incident response enhancements
-- Long-term risk mitigation
-
-Focus on insights that emerge only from analyzing multiple sources together.
-"""
-        return prompt
-
-    def get_interactive_chat_prompt(self, context: Dict[str, Any]) -> str:
-        """Enhanced interactive chat prompt"""
-        
-        prompt = f"""{self.base_context}
-
-INTERACTIVE CYBERSECURITY CONSULTATION:
-Answer the user's question about the forensic analysis with expert insight.
-
-USER QUESTION: {context.get('user_question', '')}
-
-RELEVANT EVIDENCE:
-{self._format_chat_context(context.get('analysis_data', {}))}
-
-CONVERSATION HISTORY:
-{self._format_conversation_history(context.get('conversation_history', []))}
-
-RESPONSE REQUIREMENTS:
-- Answer the specific question directly and thoroughly
-- Provide cybersecurity expertise and context
-- Reference specific evidence when relevant
-- Suggest follow-up questions or analysis if appropriate
-- Maintain conversation context and continuity
-- Use clear, professional language appropriate to the question complexity
-
-If the question requires analysis not present in the evidence, clearly explain what additional information would be needed and suggest how to obtain it.
-
-Provide actionable cybersecurity insights that help the user understand and respond to the threats.
-"""
-        return prompt
-
-    def get_threat_intelligence_prompt(self, context: Dict[str, Any]) -> str:
-        """Enhanced threat intelligence generation prompt"""
-        
-        prompt = f"""{self.base_context}
-
-THREAT INTELLIGENCE ANALYSIS REQUEST:
-Generate comprehensive threat intelligence from the analyzed indicators.
-
-INDICATORS FOR ANALYSIS:
-{self._format_detailed_iocs(context.get('iocs', []))}
-
-SUPPORTING EVIDENCE:
-{self._format_extracted_data(context.get('evidence_context', {}))}
-
-THREAT INTELLIGENCE REQUIREMENTS:
-
-## INDICATOR ANALYSIS
-For each significant indicator:
-- Threat classification and severity
-- Known associations with malware families
-- Historical usage in campaigns
-- Confidence assessment
-
-## THREAT ACTOR ATTRIBUTION
-Analyze for attribution indicators:
-- TTP matching with known threat actors
-- Infrastructure patterns and hosting
-- Tool and technique preferences
-- Geographic and temporal patterns
-
-## CAMPAIGN CORRELATION
-Identify potential campaign associations:
-- Similar attack patterns
-- Related infrastructure
-- Coordinated timing
-- Target selection patterns
-
-## THREAT LANDSCAPE CONTEXT
-Position threats within broader landscape:
-- Current threat trends alignment
-- Industry targeting patterns
-- Geographic threat distribution
-- Emerging attack techniques
-
-## DEFENSIVE INTELLIGENCE
-Generate actionable defense information:
-- IOC-based detection rules
-- Behavioral detection logic
-- Threat hunting hypotheses
-- Prevention recommendations
-
-## STRATEGIC INTELLIGENCE
-Provide strategic insights:
-- Threat actor motivation assessment
-- Future attack prediction
-- Risk trajectory analysis
-- Investment recommendations
-
-Focus on intelligence that enables proactive defense and threat hunting.
-"""
-        return prompt
-
-    def get_incident_report_prompt(self, context: Dict[str, Any]) -> str:
-        """Enhanced incident report generation prompt"""
-        
-        prompt = f"""{self.base_context}
-
-COMPREHENSIVE INCIDENT REPORT GENERATION:
-Create a detailed incident response report suitable for executive and technical audiences.
-
-INCIDENT DETAILS:
-- Incident ID: {context.get('incident_id', 'Unknown')}
-- Detection Time: {context.get('detection_time', 'Unknown')}
-- Affected Systems: {context.get('affected_systems', 'Unknown')}
-
-EVIDENCE ANALYSIS SUMMARY:
-{self._format_incident_evidence(context.get('evidence_summary', {}))}
-
-INCIDENT TIMELINE:
-{self._format_incident_timeline(context.get('timeline', []))}
+KEY FINDINGS:
+{self._format_report_findings(context.get('analysis_results', []))}
 
 REPORT STRUCTURE REQUIREMENTS:
 
 ## EXECUTIVE SUMMARY
-**For senior leadership (non-technical):**
-- What happened in business terms
-- Impact on operations and data
-- Financial and reputational implications
-- Current status and next steps
+- Incident overview (2-3 paragraphs)
+- Critical findings
+- Business impact
+- Recommended actions
 
-## INCIDENT OVERVIEW
-**Technical summary:**
-- Attack vector and method
-- Systems and data affected
-- Duration and scope
-- Detection and response timeline
+## INCIDENT DETAILS
+### Timeline of Events
+- Chronological sequence of activities
+- Key milestones identified
 
-## DETAILED TECHNICAL ANALYSIS
-**For technical teams:**
-- Complete attack chain reconstruction
-- Threat actor TTPs and tools used
-- Security control failures and bypasses
-- Evidence analysis and findings
+### Technical Findings
+- Malware analysis results
+- Network activity summary
+- System compromises
+- Data exposure assessment
+
+### Threat Actor Profile
+- Attribution indicators
+- TTPs observed
+- Sophistication assessment
 
 ## IMPACT ASSESSMENT
-**Business and technical impact:**
-- Data accessed, modified, or stolen
-- System availability and performance
-- Regulatory and compliance implications
-- Customer and stakeholder effects
+### Systems Affected
+- List of compromised systems
+- Level of compromise
+- Recovery requirements
 
-## RESPONSE ACTIONS TAKEN
-**Chronological response activities:**
-- Detection and initial response
-- Containment and isolation measures
-- Eradication and recovery efforts
-- Communication and coordination
+### Data Impact
+- Types of data accessed
+- Volume of data affected
+- Sensitivity classification
 
-## ROOT CAUSE ANALYSIS
-**Why the incident occurred:**
-- Primary vulnerability or weakness
-- Contributing factors and failures
-- Systemic issues identified
-- Process and technology gaps
+### Business Impact
+- Operational disruptions
+- Financial implications
+- Reputational considerations
 
-## LESSONS LEARNED
-**Improvement opportunities:**
-- What worked well in response
-- What could be improved
-- Technology and process gaps
-- Training and awareness needs
+## RESPONSE ACTIONS
+### Immediate Response
+- Containment measures taken
+- Evidence preserved
+- Initial remediation
+
+### Ongoing Actions
+- Investigation activities
+- System hardening
+- Monitoring enhancement
 
 ## RECOMMENDATIONS
-**Prioritized improvement actions:**
-- **Immediate** (0-30 days): Critical fixes
-- **Short-term** (1-6 months): Important improvements
-- **Long-term** (6+ months): Strategic enhancements
+### Technical Recommendations
+- Security control improvements
+- Architecture changes
+- Tool implementations
+
+### Process Recommendations
+- Policy updates needed
+- Training requirements
+- Incident response improvements
 
 ## APPENDICES
-**Supporting documentation:**
-- Technical evidence details
-- IOC lists and detection rules
-- Timeline of all events
-- Communication records
+### A. Detailed IOCs
+### B. Technical Evidence
+### C. Recovery Procedures
 
-Format as a professional incident report with clear sections, executive summary, and actionable recommendations.
+Generate a professional report suitable for executive leadership and technical teams.
 """
         return prompt
+    
+    def get_chat_system_prompt(self) -> str:
+        """System prompt for chat interactions"""
+        
+        return f"""{self.base_context}
 
-    def _format_correlation_sources(self, files: List[Dict[str, Any]]) -> str:
-        """Format correlation source information"""
-        if not files:
-            return "No source files provided"
+You are an interactive cybersecurity assistant helping users understand and respond to security incidents. You have access to detailed analysis results and can provide expert guidance.
+
+ASSISTANT CAPABILITIES:
+- Explain technical findings in accessible terms
+- Answer questions about specific threats or IOCs
+- Provide remediation guidance
+- Help prioritize response actions
+- Clarify attack techniques and impacts
+- Suggest investigation next steps
+
+COMMUNICATION STYLE:
+- Be concise but thorough
+- Use technical terms when appropriate but explain them
+- Provide specific, actionable advice
+- Ask clarifying questions when needed
+- Reference specific evidence when available
+
+Remember: You're helping both technical and non-technical users understand complex security incidents.
+"""
+
+    # Helper formatting methods
+    def _format_extracted_data(self, details: Dict[str, Any]) -> str:
+        """Format extracted data for prompt"""
+        if not details:
+            return "No extracted data available"
         
         formatted = []
-        for i, file_info in enumerate(files, 1):
-            formatted.append(f"{i}. **{file_info.get('file_path', 'Unknown')}**")
-            formatted.append(f"   - Type: {file_info.get('analysis_type', 'Unknown')}")
-            formatted.append(f"   - Threats: {file_info.get('threat_count', 0)}")
-            formatted.append(f"   - IOCs: {file_info.get('ioc_count', 0)}")
+        for key, value in details.items():
+            if isinstance(value, dict):
+                formatted.append(f"**{key.replace('_', ' ').title()}**:")
+                for sub_key, sub_value in value.items():
+                    formatted.append(f"  - {sub_key}: {self._truncate_value(sub_value)}")
+            elif isinstance(value, list):
+                formatted.append(f"**{key.replace('_', ' ').title()}**: {len(value)} items")
+                if value and len(value) <= 3:
+                    for item in value:
+                        formatted.append(f"  - {self._truncate_value(item)}")
+            else:
+                formatted.append(f"**{key.replace('_', ' ').title()}**: {self._truncate_value(value)}")
         
         return "\n".join(formatted)
 
-    def _format_aggregate_data(self, aggregate_data: Dict[str, Any]) -> str:
-        """Format aggregated data across sources"""
-        if not aggregate_data:
-            return "No aggregate data available"
+    def _format_factual_iocs(self, iocs: List[Dict[str, Any]]) -> str:
+        """Format factual IOCs for prompt"""
+        if not iocs:
+            return "No IOCs extracted"
         
         formatted = []
-        for key, value in aggregate_data.items():
-            formatted.append(f"**{key.replace('_', ' ').title()}**: {self._format_data_value(value)}")
+        ioc_by_type = {}
+        
+        for ioc in iocs:
+            ioc_type = ioc.get('type', 'Unknown')
+            if ioc_type not in ioc_by_type:
+                ioc_by_type[ioc_type] = []
+            ioc_by_type[ioc_type].append(ioc)
+        
+        for ioc_type, ioc_list in ioc_by_type.items():
+            formatted.append(f"\n**{ioc_type}** ({len(ioc_list)} found):")
+            for ioc in ioc_list[:5]:  # Limit to 5 per type
+                value = ioc.get('value', 'N/A')
+                confidence = ioc.get('confidence', 0)
+                source = ioc.get('source', 'Unknown')
+                formatted.append(f"  - {value} (confidence: {confidence}, source: {source})")
         
         return "\n".join(formatted)
 
-    def _format_chat_context(self, analysis_data: Dict[str, Any]) -> str:
-        """Format analysis data for chat context"""
-        if not analysis_data:
-            return "No analysis context available"
+    def _format_detailed_iocs(self, iocs: List[Dict[str, Any]]) -> str:
+        """Format detailed IOCs for analysis"""
+        if not iocs:
+            return "No high-confidence IOCs found"
         
         formatted = []
-        priority_keys = ['file_path', 'analysis_type', 'summary', 'severity', 'risk_score', 'threats', 'iocs']
-        
-        for key in priority_keys:
-            if key in analysis_data:
-                formatted.append(f"**{key.replace('_', ' ').title()}**: {self._format_data_value(analysis_data[key])}")
+        for i, ioc in enumerate(iocs[:20], 1):  # Limit to prevent token overflow
+            formatted.append(f"{i}. **{ioc.get('type', 'Unknown')}**: {ioc.get('value', 'N/A')}")
+            formatted.append(f"   - Confidence: {ioc.get('confidence', 0)}")
+            formatted.append(f"   - Source: {ioc.get('source', 'Unknown')}")
+            if ioc.get('description'):
+                formatted.append(f"   - Description: {ioc['description']}")
         
         return "\n".join(formatted)
 
-    def _format_conversation_history(self, history: List[Dict[str, Any]]) -> str:
-        """Format conversation history for context"""
-        if not history:
-            return "No previous conversation"
+    def _format_ioc_categories(self, categories: Dict[str, List]) -> str:
+        """Format IOC categories"""
+        if not categories:
+            return "No IOC categories available"
         
         formatted = []
-        for msg in history[-6:]:  # Last 6 messages for context
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')[:150]  # Truncate for context
-            formatted.append(f"**{role.title()}**: {content}")
+        for category, items in categories.items():
+            if items:
+                formatted.append(f"\n**{category.replace('_', ' ').title()}** ({len(items)} unique):")
+                for item in items[:5]:  # Show first 5
+                    formatted.append(f"  - {item}")
+                if len(items) > 5:
+                    formatted.append(f"  - ... and {len(items) - 5} more")
         
         return "\n".join(formatted)
 
-    def _format_incident_evidence(self, evidence_summary: Dict[str, Any]) -> str:
-        """Format incident evidence summary"""
-        if not evidence_summary:
-            return "No evidence summary available"
-        
-        formatted = []
-        for key, value in evidence_summary.items():
-            formatted.append(f"**{key.replace('_', ' ').title()}**: {self._format_data_value(value)}")
-        
-        return "\n".join(formatted)
-
-    def _format_incident_timeline(self, timeline: List[Dict[str, Any]]) -> str:
-        """Format incident timeline for reporting"""
+    def _format_timeline_context(self, timeline: List[Dict[str, Any]]) -> str:
+        """Format timeline events for prompt"""
         if not timeline:
-            return "No timeline available"
+            return "No timeline events available"
         
         formatted = []
-        for event in timeline:
+        formatted.append(f"Total Events: {len(timeline)}")
+        
+        # Show sample of events
+        for event in timeline[:20]:  # Limit to prevent token overflow
             timestamp = event.get('timestamp', 'Unknown')
-            action = event.get('action', 'Unknown action')
-            actor = event.get('actor', 'Unknown actor')
-            formatted.append(f"**{timestamp}** - {actor}: {action}")
+            event_type = event.get('event', 'Unknown')
+            description = event.get('description', 'No description')
+            formatted.append(f"\n**{timestamp}** - {event_type}")
+            formatted.append(f"  {description}")
+        
+        if len(timeline) > 20:
+            formatted.append(f"\n... and {len(timeline) - 20} more events")
         
         return "\n".join(formatted)
+
+    def _format_case_info(self, case_info: Dict[str, Any]) -> str:
+        """Format case information for prompt"""
+        if not case_info:
+            return "No case information provided"
+        
+        return f"""
+Case ID: {case_info.get('case_id', 'Unknown')}
+Case Name: {case_info.get('name', 'Unnamed Case')}
+Created: {case_info.get('created_timestamp', 'Unknown')}
+Description: {case_info.get('description', 'No description')}
+Status: {case_info.get('status', 'Unknown')}
+"""
+
+    def _format_report_findings(self, results: List[Dict[str, Any]]) -> str:
+        """Format findings for report generation"""
+        if not results:
+            return "No analysis results available"
+        
+        high_risk = [r for r in results if r.get('risk_score', 0) >= 0.7]
+        critical_threats = []
+        
+        for result in results:
+            for threat in result.get('threats_detected', []):
+                if threat.get('severity', '').upper() in ['CRITICAL', 'HIGH']:
+                    critical_threats.append(threat)
+        
+        return f"""
+High Risk Files: {len(high_risk)} of {len(results)}
+Critical Threats: {len(critical_threats)}
+Average Risk Score: {sum(r.get('risk_score', 0) for r in results) / len(results):.2f}
+
+Top Threats:
+{self._format_aggregated_threats(critical_threats[:5])}
+"""
+
+    def _format_aggregated_threats(self, threats: List[Dict[str, Any]]) -> str:
+        """Format aggregated threats for prompt"""
+        if not threats:
+            return "No threats detected"
+        
+        formatted = []
+        for i, threat in enumerate(threats[:10], 1):
+            formatted.append(
+                f"{i}. {threat.get('threat_type', 'Unknown')} "
+                f"(Severity: {threat.get('severity', 'UNKNOWN')})\n"
+                f"   Description: {threat.get('description', 'N/A')}\n"
+                f"   Source: {threat.get('source_file', 'Unknown')}"
+            )
+        
+        return "\n".join(formatted)
+
+    def _format_key_findings(self, findings: List[Dict[str, Any]]) -> str:
+        """Format key findings for prompt"""
+        if not findings:
+            return "No key findings identified"
+        
+        formatted = []
+        for i, finding in enumerate(findings[:10], 1):
+            formatted.append(f"{i}. {finding.get('type', 'Unknown')}: {finding.get('description', 'No description')}")
+        
+        return "\n".join(formatted)
+
+    def _format_aggregated_iocs(self, iocs: List[Dict[str, Any]]) -> str:
+        """Format aggregated IOCs for prompt"""
+        if not iocs:
+            return "No IOCs found"
+        
+        # Group by type
+        ioc_groups = defaultdict(list)
+        for ioc in iocs[:50]:  # Limit to prevent token overflow
+            ioc_groups[ioc.get('type', 'unknown')].append(ioc)
+        
+        formatted = []
+        for ioc_type, ioc_list in ioc_groups.items():
+            formatted.append(f"\n{ioc_type} ({len(ioc_list)} found):")
+            for ioc in ioc_list[:5]:  # Show sample
+                formatted.append(f"  - {ioc.get('value', 'N/A')} (confidence: {ioc.get('confidence', 0)})")
+        
+        return "\n".join(formatted)
+
+    def _format_file_relationships(self, relationships: List[Dict[str, Any]]) -> str:
+        """Format file relationships for prompt"""
+        if not relationships:
+            return "No file relationships identified"
+        
+        formatted = []
+        for i, rel in enumerate(relationships[:5], 1):
+            formatted.append(
+                f"{i}. {rel.get('type', 'Unknown')} relationship:\n"
+                f"   Files: {', '.join(rel.get('related_files', []))}\n"
+                f"   Evidence: {rel.get('ioc_value', 'N/A')}"
+            )
+        
+        return "\n".join(formatted)
+
+    def _truncate_value(self, value: Any, max_length: int = 100) -> str:
+        """Truncate long values for display"""
+        str_value = str(value)
+        if len(str_value) > max_length:
+            return str_value[:max_length] + "..."
+        return str_value
+
+    def _format_data_value(self, value: Any) -> str:
+        """Format data value for display"""
+        if isinstance(value, list):
+            return f"[{len(value)} items]"
+        elif isinstance(value, dict):
+            return f"{{object with {len(value)} fields}}"
+        else:
+            return self._truncate_value(value)
